@@ -70,6 +70,10 @@ function boardSvg(fen, { flip = false, last = null, selected = null, legal = [],
   return svg + "</svg>";
 }
 function drawBoard() {
+  if (E.on) {
+    $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
+    return;
+  }
   const best = S.analysis && S.analysis.fen === curFen() && S.analysis.candidates && S.analysis.candidates[0];
   $("#board").innerHTML = boardSvg(curFen(), {
     flip: S.orient === "black", last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
@@ -77,8 +81,73 @@ function drawBoard() {
   });
 }
 
+/* ---------- free board editor ---------- */
+const E = { on: false, grid: null, tool: "move", sel: null, turn: "w", castle: { K: true, Q: true, k: true, q: true } };
+const OUTLINE = { K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙" };
+function gridFen() {
+  const place = E.grid.map((row) => {
+    let o = "", n = 0;
+    for (const c of row) { if (c) { if (n) o += n; n = 0; o += c; } else n++; }
+    return o + (n || "");
+  }).join("/");
+  const g = (r, f) => E.grid[r][f];
+  let c = "";
+  if (E.castle.K && g(7, 4) === "K" && g(7, 7) === "R") c += "K";
+  if (E.castle.Q && g(7, 4) === "K" && g(7, 0) === "R") c += "Q";
+  if (E.castle.k && g(0, 4) === "k" && g(0, 7) === "r") c += "k";
+  if (E.castle.q && g(0, 4) === "k" && g(0, 0) === "r") c += "q";
+  return `${place} ${E.turn} ${c || "-"} - 0 1`;
+}
+function buildPalette() {
+  const btn = (tool, label, cls) => `<button data-tool="${tool}" class="${cls || ""}" title="${tool}">${label}</button>`;
+  $("#ed-palette").innerHTML = btn("move", "✥ Move", "tl") + btn("x", "✖ Erase", "tl") +
+    Object.keys(OUTLINE).map((k) => btn(k, OUTLINE[k] + "︎", "pc w")).join("") +
+    Object.keys(OUTLINE).map((k) => btn(k.toLowerCase(), GLYPH[k.toLowerCase()] + "︎", "pc b")).join("");
+  markTool();
+}
+function markTool() { document.querySelectorAll("#ed-palette button").forEach((b) => b.classList.toggle("active", b.dataset.tool === E.tool)); }
+function startEdit() {
+  const f = curFen().split(" ");
+  E.on = true; E.grid = parseFen(curFen()).map((r) => r.slice()); E.sel = null; E.tool = "move";
+  E.turn = f[1] || "w";
+  for (const k of "KQkq") E.castle[k] = (f[2] || "").includes(k);
+  $("#editor").classList.remove("hidden"); $("#move-form").classList.add("hidden");
+  $("#ed-turn").value = E.turn;
+  document.querySelectorAll("#ed-castle input").forEach((i) => (i.checked = E.castle[i.dataset.c]));
+  buildPalette(); drawBoard();
+}
+function stopEdit() { E.on = false; $("#editor").classList.add("hidden"); $("#move-form").classList.remove("hidden"); drawBoard(); }
+function editClick(sq) {
+  const f = "abcdefgh".indexOf(sq[0]), r = 8 - +sq[1];
+  if (E.tool === "x") E.grid[r][f] = null;
+  else if (E.tool === "move") {
+    if (E.sel) {
+      const [sf, sr] = E.sel;
+      if (!(sf === f && sr === r)) { E.grid[r][f] = E.grid[sr][sf]; E.grid[sr][sf] = null; }
+      E.sel = null;
+    } else if (E.grid[r][f]) E.sel = [f, r];
+  } else E.grid[r][f] = E.tool;
+  drawBoard();
+}
+$("#btn-edit").onclick = () => (E.on ? stopEdit() : startEdit());
+$("#ed-palette").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { E.tool = b.dataset.tool; E.sel = null; markTool(); drawBoard(); } });
+$("#ed-turn").onchange = (e) => (E.turn = e.target.value);
+$("#ed-castle").addEventListener("change", (e) => (E.castle[e.target.dataset.c] = e.target.checked));
+$("#ed-clear").onclick = () => { E.grid = Array.from({ length: 8 }, () => Array(8).fill(null)); E.sel = null; drawBoard(); };
+$("#ed-start").onclick = () => { E.grid = parseFen(START).map((r) => r.slice()); E.turn = "w"; E.sel = null; for (const k of "KQkq") E.castle[k] = true; $("#ed-turn").value = "w"; document.querySelectorAll("#ed-castle input").forEach((i) => (i.checked = true)); drawBoard(); };
+$("#ed-cancel").onclick = stopEdit;
+$("#ed-done").onclick = async () => {
+  const fen = gridFen();
+  try {
+    await api("/api/state", { fen });
+    if (S.plies.length && !confirm("Applying this position starts a fresh game from it (the move list is cleared). Continue?")) return;
+    stopEdit(); newGame(fen); toast("Position set");
+  } catch (err) { toast(err.message, true); }
+};
+
 $("#board").addEventListener("click", (e) => {
   const sq = e.target.dataset && e.target.dataset.sq;
+  if (sq && E.on) return editClick(sq);
   if (!sq || !S.st || S.st.over) return;
   const grid = parseFen(curFen()), piece = grid[8 - +sq[1]]["abcdefgh".indexOf(sq[0])];
   if (selected && selected !== sq) {
@@ -152,6 +221,7 @@ function newGame(fen, plies = [], viewing = null) {
 }
 
 async function playText(text) {
+  if (E.on) return;
   if (!S.st || S.st.over) return toast("The game is over — undo or reset.", true);
   try {
     const p = await api("/api/move", { fen: curFen(), text });
@@ -172,6 +242,7 @@ $("#move-input").addEventListener("keydown", (e) => { if (e.key === "Escape") { 
 let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
 function analyse() {
+  if (E.on) return;
   clearTimeout(aTimer);
   if (aborter) aborter.abort();
   if (S.st.over) { S.analysis = { fen: curFen(), candidates: [] }; renderAnalysis(false); return; }
@@ -469,7 +540,7 @@ sform.addEventListener("submit", async (e) => {
 /* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
 let syncSeq = -1, syncBusy = false;
 async function syncTick() {
-  if (syncBusy) return;
+  if (syncBusy || E.on) return;
   syncBusy = true;
   try {
     const d = await api("/api/sync");

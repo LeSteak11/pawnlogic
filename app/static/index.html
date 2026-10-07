@@ -33,9 +33,22 @@
         <button id="nav-next" title="Forward (→)">▶</button>
         <button id="nav-end" title="Last (End)">⏭</button>
         <span class="spacer"></span>
+        <button id="btn-edit" title="Place, move or remove pieces freely">✎ Edit board</button>
         <button id="btn-flip">⇅ Flip</button>
         <button id="btn-undo">↶ Undo</button>
         <button id="btn-reset">⟲ Reset</button>
+      </div>
+      <div id="editor" class="card hidden">
+        <div class="label">Edit board: pick a tool, then click squares</div>
+        <div id="ed-palette" class="palette"></div>
+        <div class="edrow">
+          <label>Side to move <select id="ed-turn"><option value="w">White</option><option value="b">Black</option></select></label>
+          <span id="ed-castle">Castling:
+            <label><input type="checkbox" data-c="K"> K</label><label><input type="checkbox" data-c="Q"> Q</label>
+            <label><input type="checkbox" data-c="k"> k</label><label><input type="checkbox" data-c="q"> q</label></span>
+        </div>
+        <div class="navrow"><button id="ed-start">Start position</button><button id="ed-clear">Clear board</button>
+          <span class="spacer"></span><button id="ed-cancel">Cancel</button><button id="ed-done" class="primary">Done</button></div>
       </div>
       <form id="move-form" autocomplete="off">
         <input id="move-input" placeholder="Type a move (Nf3, e4, e7e8q) — Enter alone plays the best move" spellcheck="false">

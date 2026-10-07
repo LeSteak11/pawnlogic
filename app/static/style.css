@@ -78,3 +78,9 @@ dialog h3 { margin: 0 0 12px; } .dlgbtns { display: flex; justify-content: flex-
 #toast.show { opacity: 1; } #toast.err { border-color: var(--bad); }
 tr.sel{background:var(--panel2)}
 .syncbox{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:14px}.syncbox input{width:auto}
+
+.palette{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+.palette button{min-width:40px;font-size:22px;line-height:1;padding:4px 8px}
+.palette button.tl{font-size:14px}.palette button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.palette .pc.w{color:var(--text)}.edrow{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px}
+.edrow select{width:auto;display:inline-block}.edrow label{display:inline-flex;gap:4px;align-items:center;margin-right:6px}.edrow input{width:auto}
