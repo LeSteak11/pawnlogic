@@ -25,6 +25,20 @@ CREATE TABLE IF NOT EXISTS games (
   experiment_id TEXT,
   notes TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS experiments (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL,
+  total_games INTEGER NOT NULL,
+  max_plies INTEGER NOT NULL,
+  config_a TEXT NOT NULL,
+  config_b TEXT NOT NULL,
+  label_a TEXT NOT NULL,
+  label_b TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'stopped',  -- running | stopped | done | error
+  note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_games_exp ON games(experiment_id);
 CREATE INDEX IF NOT EXISTS idx_games_created ON games(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_games_source ON games(source);
 CREATE INDEX IF NOT EXISTS idx_games_opponent ON games(opponent);
@@ -66,11 +80,14 @@ def add_game(**g) -> str:
     return gid
 
 
-LIST_COLS = f"id, created_at, source, opponent, my_color, result, plies, engine_label, experiment_id, ({OUTCOME}) AS outcome"
+LIST_COLS = f"id, created_at, source, opponent, my_color, result, plies, engine_label, experiment_id, notes, json_extract(engine_config, '$.white') AS exp_white, ({OUTCOME}) AS outcome"
 
 
-def list_games(q="", source="", limit=50, offset=0):
+def list_games(q="", source="", limit=50, offset=0, experiment=""):
     where, args = [], []
+    if experiment:
+        where.append("experiment_id = ?")
+        args.append(experiment)
     if source:
         where.append("source = ?")
         args.append(source)
@@ -143,3 +160,71 @@ def stats(source=""):
 def opponents():
     return [r[0] for r in conn().execute(
         "SELECT opponent FROM games WHERE opponent <> '' GROUP BY opponent ORDER BY MAX(created_at) DESC LIMIT 30")]
+
+
+# ---------- experiments ----------
+def create_experiment(name, total, max_plies, ca, cb, la, lb):
+    eid = uuid.uuid4().hex[:10]
+    conn().execute(
+        "INSERT INTO experiments (id, created_at, name, total_games, max_plies, config_a, config_b, label_a, label_b, status)"
+        " VALUES (?,?,?,?,?,?,?,?,?, 'stopped')",
+        (eid, datetime.now(timezone.utc).isoformat(timespec="seconds"), name, total, max_plies,
+         json.dumps(ca), json.dumps(cb), la, lb))
+    conn().commit()
+    return eid
+
+
+def set_experiment(eid, **fields):
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    conn().execute(f"UPDATE experiments SET {cols} WHERE id = ?", (*fields.values(), eid))
+    conn().commit()
+
+
+def _tally(eid):
+    """Results from A's perspective, plus color split, from the games table."""
+    t = {"a_wins": 0, "b_wins": 0, "draws": 0, "white_wins": 0, "black_wins": 0, "games": 0, "plies": 0}
+    for r in conn().execute(
+        """SELECT result, json_extract(engine_config, '$.white') AS w, COUNT(*) n, SUM(plies) p
+           FROM games WHERE experiment_id = ? AND result <> '*' GROUP BY result, w""", (eid,)):
+        n = r["n"]
+        t["games"] += n
+        t["plies"] += r["p"] or 0
+        if r["result"] == "1/2-1/2":
+            t["draws"] += n
+        else:
+            t["white_wins" if r["result"] == "1-0" else "black_wins"] += n
+            a_won = (r["result"] == "1-0") == (r["w"] == "A")
+            t["a_wins" if a_won else "b_wins"] += n
+    return t
+
+
+def _exp_row(r):
+    d = dict(r)
+    d["config_a"], d["config_b"] = json.loads(d["config_a"]), json.loads(d["config_b"])
+    d["tally"] = _tally(d["id"])
+    return d
+
+
+def list_experiments():
+    return [_exp_row(r) for r in conn().execute("SELECT * FROM experiments ORDER BY created_at DESC")]
+
+
+def get_experiment(eid):
+    r = conn().execute("SELECT * FROM experiments WHERE id = ?", (eid,)).fetchone()
+    return _exp_row(r) if r else None
+
+
+def delete_experiment(eid):
+    conn().execute("DELETE FROM games WHERE experiment_id = ?", (eid,))
+    conn().execute("DELETE FROM experiments WHERE id = ?", (eid,))
+    conn().commit()
+
+
+def count_experiment_games(eid):
+    return conn().execute("SELECT COUNT(*) FROM games WHERE experiment_id = ?", (eid,)).fetchone()[0]
+
+
+def reset_running_experiments():
+    """Startup: a 'running' row with no live thread means the app was closed mid-run."""
+    conn().execute("UPDATE experiments SET status = 'stopped' WHERE status = 'running'")
+    conn().commit()

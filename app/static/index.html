@@ -13,6 +13,7 @@
     <button data-tab="analyze" class="active">Analyze</button>
     <button data-tab="history">History</button>
     <button data-tab="dashboard">Dashboard</button>
+    <button data-tab="experiments">Experiments</button>
   </nav>
   <button id="btn-settings" class="ghost" title="Engine settings">⚙ Settings</button>
 </header>
@@ -102,6 +103,15 @@
     </div>
   </div>
   <div id="dash"></div>
+</section>
+<section id="tab-experiments" class="hidden">
+  <div class="analyze-grid">
+    <div class="left"><form id="exp-form" onsubmit="return false"></form></div>
+    <div class="right">
+      <div class="card tablecard"><table><thead><tr><th>Experiment</th><th>Status</th><th>Games</th><th>A–D–B</th></tr></thead><tbody id="exp-list"></tbody></table></div>
+      <div id="exp-detail"></div>
+    </div>
+  </div>
 </section>
 </main>
 

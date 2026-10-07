@@ -42,11 +42,8 @@ const sqName = (f, r) => "abcdefgh"[f] + (r + 1);
 
 /* ---------- board ---------- */
 let selected = null;
-function drawBoard() {
-  const grid = parseFen(curFen());
-  const flip = S.orient === "black";
-  const last = S.cursor > 0 ? S.plies[S.cursor - 1].uci : null;
-  const legal = S.st ? S.st.legal : [];
+function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null } = {}) {
+  const grid = parseFen(fen);
   let svg = `<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#4c9a2a"/></marker></defs>`;
   const pos = (f, r) => (flip ? [(7 - f) * 10, r * 10] : [f * 10, (7 - r) * 10]);
   for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
@@ -66,12 +63,18 @@ function drawBoard() {
     const [x, y] = pos("abcdefgh".indexOf(u[2]), +u[3] - 1);
     svg += `<circle cx="${x + 5}" cy="${y + 5}" r="1.7" fill="rgba(40,40,40,.45)" pointer-events="none"/>`;
   }
-  const best = S.analysis && S.analysis.fen === curFen() && S.analysis.candidates && S.analysis.candidates[0];
-  if (best) {
-    const [x1, y1] = pos("abcdefgh".indexOf(best.uci[0]), +best.uci[1] - 1), [x2, y2] = pos("abcdefgh".indexOf(best.uci[2]), +best.uci[3] - 1);
+  if (arrow) {
+    const [x1, y1] = pos("abcdefgh".indexOf(arrow[0]), +arrow[1] - 1), [x2, y2] = pos("abcdefgh".indexOf(arrow[2]), +arrow[3] - 1);
     svg += `<line x1="${x1 + 5}" y1="${y1 + 5}" x2="${x2 + 5}" y2="${y2 + 5}" stroke="#4c9a2a" stroke-opacity=".8" stroke-width="1.4" marker-end="url(#ah)" pointer-events="none"/>`;
   }
-  $("#board").innerHTML = svg + "</svg>";
+  return svg + "</svg>";
+}
+function drawBoard() {
+  const best = S.analysis && S.analysis.fen === curFen() && S.analysis.candidates && S.analysis.candidates[0];
+  $("#board").innerHTML = boardSvg(curFen(), {
+    flip: S.orient === "black", last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
+    legal: S.st ? S.st.legal : [], arrow: best ? best.uci : null,
+  });
 }
 
 $("#board").addEventListener("click", (e) => {
@@ -261,9 +264,11 @@ function clearDraft() { store.set("cl_draft", null); }
 /* ---------- tabs ---------- */
 function showTab(t) {
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
-  for (const id of ["analyze", "history", "dashboard"]) $("#tab-" + id).classList.toggle("hidden", id !== t);
+  for (const id of ["analyze", "history", "dashboard", "experiments"]) $("#tab-" + id).classList.toggle("hidden", id !== t);
   if (t === "history") loadHistory(true);
   if (t === "dashboard") loadDash();
+  if (t === "experiments") loadExperiments();
+  else clearTimeout(expTimer);
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
 
@@ -337,6 +342,105 @@ async function loadDash() {
        `<tr><td>${fmtDate(g.created_at)}</td><td>${esc(g.opponent || "—")}</td><td>${resLabel(g.outcome, g.result)}</td><td>${g.my_color || "—"}</td><td>${g.source}</td><td class="muted">${esc(g.engine_label || "—")}</td></tr>`).join("") ||
        `<tr><td class="muted">No games yet.</td></tr>`}</tbody></table></div>`;
 }
+
+/* ---------- experiments ---------- */
+let expTimer, expSel = null;
+const CFG_FIELDS = [["mode", "Limit by", "select"], ["time_ms", "Time/move (ms)"], ["depth", "Depth"], ["skill_level", "Skill (0–20)"], ["elo", "Elo cap (blank = none)"], ["threads", "Threads"], ["hash_mb", "Hash (MB)"]];
+const CFG_DEFAULT = {
+  A: { time_ms: 100, depth: 8, skill_level: 20, elo: "", threads: 1, hash_mb: 64 },
+  B: { time_ms: 100, depth: 8, skill_level: 20, elo: 1800, threads: 1, hash_mb: 64 },
+};
+function cfgBox(k) {
+  return `<div class="card"><div class="label">Engine ${k}</div><div class="formgrid">` + CFG_FIELDS.map(([f, l, t]) => t === "select"
+    ? `<label>${l}<select id="x-${k}-${f}"><option value="time">Time per move</option><option value="depth">Depth</option></select></label>`
+    : `<label>${l}<input id="x-${k}-${f}" type="number" value="${CFG_DEFAULT[k][f]}"></label>`).join("") + `</div></div>`;
+}
+function buildExpForm() {
+  const f = $("#exp-form");
+  if (f.dataset.built) return;
+  f.dataset.built = 1;
+  f.innerHTML = `<div class="card"><div class="label">New experiment</div><div class="formgrid">
+    <label class="wide">Name<input id="x-name" placeholder="e.g. Full strength vs Elo 1800"></label>
+    <label>Games (even = fair colors)<input id="x-games" type="number" value="20" min="2"></label>
+    <label>Max moves per game (plies)<input id="x-max" type="number" value="300" min="40"></label></div></div>
+    ${cfgBox("A")}${cfgBox("B")}
+    <button id="x-start" class="primary">▶ Start experiment</button>`;
+  $("#x-start").onclick = startExperiment;
+}
+function readCfg(k) {
+  const o = {};
+  for (const [f, , t] of CFG_FIELDS) { const v = $(`#x-${k}-${f}`).value; o[f] = t === "select" ? v : (v === "" ? null : +v); }
+  return o;
+}
+async function startExperiment() {
+  try {
+    const r = await api("/api/experiments", { name: $("#x-name").value, games: +$("#x-games").value, max_plies: +$("#x-max").value, a: readCfg("A"), b: readCfg("B") });
+    expSel = r.id; toast("Experiment started"); loadExperiments();
+  } catch (err) { toast(err.message, true); }
+}
+const expStatus = { running: "Running", stopped: "Stopped", done: "Complete", error: "Error" };
+async function loadExperiments() {
+  clearTimeout(expTimer);
+  buildExpForm();
+  let list;
+  try { list = await api("/api/experiments"); } catch (err) { return toast(err.message, true); }
+  if (!expSel && list.length) expSel = list[0].id;
+  $("#exp-list").innerHTML = list.length ? list.map((e) => {
+    const t = e.tally;
+    return `<tr data-id="${e.id}" class="${e.id === expSel ? "sel" : ""}" style="cursor:pointer"><td>${esc(e.name)}</td><td>${expStatus[e.status]}</td><td>${t.games}/${e.total_games}</td><td>${t.a_wins}–${t.draws}–${t.b_wins}</td></tr>`;
+  }).join("") : `<tr><td class="muted">No experiments yet.</td></tr>`;
+  const sel = list.find((e) => e.id === expSel);
+  if (sel) renderExpDetail(sel); else $("#exp-detail").innerHTML = "";
+  if (list.some((e) => e.status === "running") && !$("#tab-experiments").classList.contains("hidden")) expTimer = setTimeout(loadExperiments, 1000);
+}
+$("#exp-list").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) { expSel = tr.dataset.id; loadExperiments(); } });
+function renderExpDetail(e) {
+  const t = e.tally, n = t.games || 1, pct = (100 * t.games / e.total_games).toFixed(0);
+  const score = t.games ? (100 * (t.a_wins + t.draws / 2) / t.games).toFixed(1) + "%" : "—";
+  const elo = e.elo ? (e.elo.elo === null ? e.elo.note : `A is ${e.elo.elo >= 0 ? "+" : ""}${e.elo.elo} ± ${e.elo.margin} Elo vs B (95% interval)`)
+    : `Elo estimate appears after 20 finished games (${t.games} so far)`;
+  const live = e.live;
+  $("#exp-detail").innerHTML = `<div class="card">
+    <div class="evalrow"><b style="font-size:20px">${esc(e.name)}</b><span class="muted">${expStatus[e.status]}${e.note ? " — " + esc(e.note) : ""}</span></div>
+    <div class="muted" style="font-size:13px">A: ${esc(e.label_a)}<br>B: ${esc(e.label_b)}</div>
+    <div class="bar" style="height:10px;margin:10px 0"><i style="width:${pct}%;background:var(--accent)"></i></div>
+    <div class="tiles">
+      <div class="tile"><div class="v">${t.a_wins}</div><div class="l">A wins</div></div>
+      <div class="tile"><div class="v">${t.draws}</div><div class="l">Draws</div></div>
+      <div class="tile"><div class="v">${t.b_wins}</div><div class="l">B wins</div></div>
+      <div class="tile"><div class="v">${score}</div><div class="l">A score</div></div>
+      <div class="tile"><div class="v">${t.games}/${e.total_games}</div><div class="l">Games done</div></div>
+    </div>
+    <div>${elo}</div>
+    <div class="muted" style="font-size:12px;margin:4px 0 10px">White won ${t.white_wins}, Black won ${t.black_wins}${t.games ? ` · avg ${Math.round(t.plies / n / 2)} moves/game` : ""}. Score = (wins + ½ draws) ÷ games.</div>
+    <div class="navrow">
+      ${e.status === "running" ? `<button id="x-stop">■ Stop</button>` : ""}
+      ${e.status !== "running" && e.status !== "done" ? `<button id="x-resume" class="primary">▶ Resume</button>` : ""}
+      ${e.status !== "running" ? `<button id="x-del">Delete</button>` : ""}
+    </div>
+    ${live ? `<div style="max-width:320px;margin-top:10px"><div class="muted">Game ${live.game_no} · ${live.white} is White · move ${Math.ceil(live.ply / 2)}</div>${boardSvg(live.fen, { last: live.last })}</div>` : ""}
+  </div>
+  <div class="card tablecard"><table><thead><tr><th>Game</th><th>Result</th><th>Winner</th><th>Moves</th></tr></thead><tbody id="x-games-body"></tbody></table></div>`;
+  if ($("#x-stop")) $("#x-stop").onclick = async () => { await api(`/api/experiments/${e.id}/stop`, {}); toast("Stopping after the current move…"); };
+  if ($("#x-resume")) $("#x-resume").onclick = async () => { try { await api(`/api/experiments/${e.id}/resume`, {}); loadExperiments(); } catch (err) { toast(err.message, true); } };
+  if ($("#x-del")) $("#x-del").onclick = async () => { if (confirm("Delete this experiment and all its games?")) { await api(`/api/experiments/${e.id}`, undefined, "DELETE"); expSel = null; loadExperiments(); } };
+  loadExpGames(e);
+}
+async function loadExpGames(e) {
+  const d = await api(`/api/games?experiment=${e.id}&limit=200`);
+  const body = $("#x-games-body"); if (!body) return;
+  body.innerHTML = d.games.slice().reverse().map((g) => {
+    const winner = g.result === "1/2-1/2" ? "Draw" : ((g.result === "1-0") === (g.exp_white === "A") ? "A" : "B");
+    return `<tr data-id="${g.id}" style="cursor:pointer"><td>${esc(g.notes || g.id.slice(0, 4))}</td><td>${esc(g.result)}</td><td>${winner}</td><td>${Math.ceil(g.plies / 2)}</td></tr>`;
+  }).join("") || `<tr><td class="muted">No finished games yet.</td></tr>`;
+}
+document.addEventListener("click", async (ev) => {
+  const tr = ev.target.closest("#x-games-body tr[data-id]"); if (!tr) return;
+  try {
+    const g = await api(`/api/games/${tr.dataset.id}`);
+    S.orient = "white"; $("#f-color").value = "white"; newGame(g.start_fen, g.plies, g); S.cursor = 0; refresh(); showTab("analyze");
+  } catch (err) { toast(err.message, true); }
+});
 
 /* ---------- settings ---------- */
 const sform = $("#settings-form");

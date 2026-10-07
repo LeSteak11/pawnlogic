@@ -57,6 +57,34 @@ def fmt_score(score: chess.engine.PovScore) -> dict:
     return {"text": f"{cp / 100:+.2f}", "cp": cp}
 
 
+def uci_options(cfg: dict) -> dict:
+    o = {"Threads": int(cfg["threads"]), "Hash": int(cfg["hash_mb"])}
+    if cfg.get("elo"):
+        o.update({"UCI_LimitStrength": True, "UCI_Elo": int(cfg["elo"])})
+    else:
+        o.update({"UCI_LimitStrength": False, "Skill Level": int(cfg["skill_level"])})
+    return o
+
+
+def engine_path(cfg: dict) -> Path:
+    p = Path(cfg["path"])
+    return p if p.is_absolute() else ROOT / p
+
+
+def open_uci(cfg: dict) -> "chess.engine.SimpleEngine":
+    path = engine_path(cfg)
+    if not path.exists():
+        raise RuntimeError(f"Stockfish not found at {path}. Put stockfish.exe in the engine/ folder.")
+    proc = chess.engine.SimpleEngine.popen_uci(str(path))
+    proc.configure({k: v for k, v in uci_options(cfg).items() if k in proc.options})
+    return proc
+
+
+def search_limit(cfg: dict) -> "chess.engine.Limit":
+    return (chess.engine.Limit(time=cfg["time_ms"] / 1000) if cfg["mode"] == "time"
+            else chess.engine.Limit(depth=int(cfg["depth"])))
+
+
 class Engine:
     def analyse(self, board: chess.Board, cfg: dict) -> dict:
         raise NotImplementedError
@@ -72,26 +100,12 @@ class StockfishEngine(Engine):
         self.proc = None
         self.opts_key = None
 
-    def _opts(self, cfg):
-        o = {"Threads": int(cfg["threads"]), "Hash": int(cfg["hash_mb"])}
-        if cfg.get("elo"):
-            o.update({"UCI_LimitStrength": True, "UCI_Elo": int(cfg["elo"])})
-        else:
-            o.update({"UCI_LimitStrength": False, "Skill Level": int(cfg["skill_level"])})
-        return o
-
     def _ensure(self, cfg):
-        path = Path(cfg["path"])
-        path = path if path.is_absolute() else ROOT / path
-        key = (str(path), json.dumps(self._opts(cfg), sort_keys=True))
+        key = (str(engine_path(cfg)), json.dumps(uci_options(cfg), sort_keys=True))
         if self.proc is not None and key == self.opts_key:
             return
         self.close()
-        if not path.exists():
-            raise RuntimeError(f"Stockfish not found at {path}. Put stockfish.exe in the engine/ folder.")
-        self.proc = chess.engine.SimpleEngine.popen_uci(str(path))
-        opts = {k: v for k, v in self._opts(cfg).items() if k in self.proc.options}
-        self.proc.configure(opts)
+        self.proc = open_uci(cfg)
         self.opts_key = key
 
     def close(self):
@@ -110,8 +124,7 @@ class StockfishEngine(Engine):
                 return {"superseded": True}
             if board.is_game_over():
                 return {"candidates": [], "depth": 0}
-            limit = (chess.engine.Limit(time=cfg["time_ms"] / 1000) if cfg["mode"] == "time"
-                     else chess.engine.Limit(depth=int(cfg["depth"])))
+            limit = search_limit(cfg)
             for attempt in (0, 1):
                 try:
                     self._ensure(cfg)

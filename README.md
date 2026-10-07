@@ -22,9 +22,18 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 - `config.json` stores engine settings (also editable under ⚙ Settings).
 - Source types: **assisted** (engine used), **independent** (no engine), **experiment** (engine-vs-engine, Phase 2). Stats are never mixed silently: the Dashboard has a filter. Win % = wins / scored games; unfinished games and experiments aren't scored.
 
+## Experiments (engine vs engine)
+Experiments tab: name it, set the game count, and configure Engine A and B (time or depth per move, skill level or Elo cap, threads, hash). Defaults: A full strength vs B capped at Elo 1800.
+- Games run one at a time on a background thread; the UI polls once a second and shows a live board. Each finished game is saved immediately (source = experiment) and appears in History.
+- Colors alternate every game. Each opening (from a built-in list of 24 short lines, shuffled per experiment) is played twice with colors swapped, so results aren't skewed by one deterministic game.
+- Games end by checkmate/stalemate/draw rules (threefold and 50-move claimed automatically) or are adjudicated a draw at the move cap.
+- Stop discards only the game in progress; Resume continues from the saved count. Closing the app mid-run leaves the experiment *Stopped*, ready to resume.
+- Stats: A/D/B tally, A's score %, white-vs-black wins and an Elo difference with a 95% interval, shown only after 20 finished games.
+- The server stays alive while an experiment runs even if the window is closed.
+
 ## Layout
 ```
-app/        server.py (API), engine.py (Engine interface + Stockfish), db.py, static/ (UI)
+app/        server.py (API), engine.py (Engine interface + Stockfish), experiments.py, db.py, static/ (UI)
 engine/     stockfish.exe (not in git)
 data/       games.db, exports/
 run.py      launcher        ChessLab.bat   Windows entry point
@@ -32,4 +41,4 @@ run.py      launcher        ChessLab.bat   Windows entry point
 Add another engine: subclass `Engine` in `app/engine.py` and register it in `ENGINES`.
 
 ## Status
-Phase 1 (analysis, save, history, dashboard) done. Phase 2: engine-vs-engine experiments.
+V1 feature-complete: analysis, save, history, dashboard, experiments.

@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .engine import ENGINES, config_label, load_config, save_config
+from .experiments import elo_estimate, label_for, runner, sanitize
 
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Chess Lab")
@@ -190,8 +191,8 @@ def save_game(body: dict = Body(...)):
 
 
 @app.get("/api/games")
-def games(q: str = "", source: str = "", limit: int = 50, offset: int = 0):
-    rows, total = db.list_games(q, source, min(limit, 200), offset)
+def games(q: str = "", source: str = "", limit: int = 50, offset: int = 0, experiment: str = ""):
+    rows, total = db.list_games(q, source, min(limit, 200), offset, experiment)
     return {"games": rows, "total": total}
 
 
@@ -248,16 +249,84 @@ def opponents():
     return db.opponents()
 
 
+def exp_view(e):
+    t = e["tally"]
+    e["elo"] = elo_estimate(t["a_wins"], t["draws"], t["b_wins"])
+    e["live"] = runner.live if runner.running and runner.live.get("id") == e["id"] else None
+    return e
+
+
+@app.get("/api/experiments")
+def experiments():
+    return [exp_view(e) for e in db.list_experiments()]
+
+
+@app.get("/api/experiments/{eid}")
+def experiment(eid: str):
+    e = db.get_experiment(eid)
+    if not e:
+        raise HTTPException(404, "Experiment not found")
+    return exp_view(e)
+
+
+@app.post("/api/experiments")
+def new_experiment(body: dict = Body(...)):
+    if runner.running:
+        bad("Another experiment is already running")
+    try:
+        ca, cb = sanitize(body.get("a", {})), sanitize(body.get("b", {}))
+        total, max_plies = int(body.get("games", 20)), int(body.get("max_plies", 300))
+    except (TypeError, ValueError):
+        bad("Check the numbers in the form")
+    if not 2 <= total <= 2000:
+        bad("Games must be between 2 and 2000")
+    name = (body.get("name") or "").strip() or f"Experiment {datetime.now():%b %d %H:%M}"
+    eid = db.create_experiment(name, total, max(40, min(max_plies, 600)), ca, cb, label_for(ca), label_for(cb))
+    runner.start(eid)
+    return {"id": eid}
+
+
+@app.post("/api/experiments/{eid}/stop")
+def stop_experiment(eid: str):
+    runner.stop()
+    return {"ok": True}
+
+
+@app.post("/api/experiments/{eid}/resume")
+def resume_experiment(eid: str):
+    e = db.get_experiment(eid)
+    if not e:
+        raise HTTPException(404, "Experiment not found")
+    if runner.running:
+        bad("Another experiment is already running")
+    if e["tally"]["games"] >= e["total_games"]:
+        bad("This experiment is already complete")
+    runner.start(eid)
+    return {"ok": True}
+
+
+@app.delete("/api/experiments/{eid}")
+def delete_experiment(eid: str):
+    if runner.running and runner.live.get("id") == eid:
+        bad("Stop the experiment before deleting it")
+    db.delete_experiment(eid)
+    return {"deleted": True}
+
+
 def _watchdog():
+    global _last_ping
     while True:
         time.sleep(10)
-        if time.time() - _last_ping > IDLE_EXIT_SECONDS:
+        if runner.running:
+            _last_ping = time.time()  # stay alive while an experiment runs with the window closed
+        elif time.time() - _last_ping > IDLE_EXIT_SECONDS:
             engine.close()
             os._exit(0)
 
 
 @app.on_event("startup")
 def _startup():
+    db.reset_running_experiments()
     threading.Thread(target=_watchdog, daemon=True).start()
 
 
