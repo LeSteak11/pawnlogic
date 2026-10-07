@@ -1,0 +1,145 @@
+"""SQLite storage: games table is the single source of truth (PGN is generated on export)."""
+import json
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = ROOT / "data" / "games.db"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('assisted','independent','experiment')),
+  opponent TEXT NOT NULL DEFAULT '',
+  my_color TEXT CHECK (my_color IN ('white','black')),
+  result TEXT NOT NULL CHECK (result IN ('1-0','0-1','1/2-1/2','*')),
+  start_fen TEXT NOT NULL,
+  pgn TEXT NOT NULL,
+  plies INTEGER NOT NULL,
+  engine_label TEXT,
+  engine_config TEXT,
+  experiment_id TEXT,
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_games_created ON games(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_games_source ON games(source);
+CREATE INDEX IF NOT EXISTS idx_games_opponent ON games(opponent);
+"""
+
+# Outcome from the user's perspective; NULL when unscorable (no color, unfinished, experiment).
+OUTCOME = """CASE
+  WHEN source = 'experiment' OR my_color IS NULL OR result = '*' THEN NULL
+  WHEN result = '1/2-1/2' THEN 'draw'
+  WHEN (my_color = 'white' AND result = '1-0') OR (my_color = 'black' AND result = '0-1') THEN 'win'
+  ELSE 'loss' END"""
+
+_local = threading.local()
+
+
+def conn() -> sqlite3.Connection:
+    c = getattr(_local, "c", None)
+    if c is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(DB_PATH)
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA journal_mode=WAL")
+        c.executescript(SCHEMA)
+        _local.c = c
+    return c
+
+
+def add_game(**g) -> str:
+    gid = uuid.uuid4().hex[:12]
+    conn().execute(
+        """INSERT INTO games (id, created_at, source, opponent, my_color, result, start_fen, pgn, plies,
+           engine_label, engine_config, experiment_id, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (gid, datetime.now(timezone.utc).isoformat(timespec="seconds"), g["source"], g.get("opponent", ""),
+         g.get("my_color"), g["result"], g["start_fen"], g["pgn"], g["plies"], g.get("engine_label"),
+         json.dumps(g["engine_config"]) if g.get("engine_config") else None, g.get("experiment_id"),
+         g.get("notes", "")),
+    )
+    conn().commit()
+    return gid
+
+
+LIST_COLS = f"id, created_at, source, opponent, my_color, result, plies, engine_label, experiment_id, ({OUTCOME}) AS outcome"
+
+
+def list_games(q="", source="", limit=50, offset=0):
+    where, args = [], []
+    if source:
+        where.append("source = ?")
+        args.append(source)
+    for term in q.split():
+        where.append("(opponent LIKE ? OR notes LIKE ? OR engine_label LIKE ? OR created_at LIKE ? OR result LIKE ?)")
+        args += [f"%{term}%"] * 5
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = conn().execute(
+        f"SELECT {LIST_COLS} FROM games {w} ORDER BY created_at DESC LIMIT ? OFFSET ?", (*args, limit, offset)
+    ).fetchall()
+    total = conn().execute(f"SELECT COUNT(*) FROM games {w}", args).fetchone()[0]
+    return [dict(r) for r in rows], total
+
+
+def get_game(gid):
+    r = conn().execute("SELECT * FROM games WHERE id = ?", (gid,)).fetchone()
+    return dict(r) if r else None
+
+
+def delete_game(gid):
+    c = conn().execute("DELETE FROM games WHERE id = ?", (gid,))
+    conn().commit()
+    return c.rowcount > 0
+
+
+def all_pgns():
+    return [r[0] for r in conn().execute("SELECT pgn FROM games ORDER BY created_at")]
+
+
+def backup_to(path: Path):
+    dst = sqlite3.connect(path)
+    conn().backup(dst)
+    dst.close()
+
+
+def stats(source=""):
+    f, args = ("WHERE source = ?", [source]) if source else ("", [])
+    base = f"(SELECT *, ({OUTCOME}) AS o FROM games {f})"
+
+    def grouped(expr, limit=15):
+        rows = conn().execute(
+            f"""SELECT {expr} AS k, COUNT(*) AS n, COALESCE(SUM(o='win'),0) AS w,
+                COALESCE(SUM(o='loss'),0) AS l, COALESCE(SUM(o='draw'),0) AS d
+                FROM {base} GROUP BY k ORDER BY n DESC LIMIT {limit}""", args).fetchall()
+        return [dict(r) for r in rows]
+
+    t = conn().execute(
+        f"""SELECT COUNT(*) AS games, COALESCE(SUM(o='win'),0) AS wins, COALESCE(SUM(o='loss'),0) AS losses,
+            COALESCE(SUM(o='draw'),0) AS draws FROM {base}""", args).fetchone()
+    totals = dict(t)
+    scored = totals["wins"] + totals["losses"] + totals["draws"]
+    totals["scored"] = scored
+    totals["win_pct"] = round(100 * totals["wins"] / scored, 1) if scored else None
+    by_source = {r["source"]: r["n"] for r in conn().execute("SELECT source, COUNT(*) n FROM games GROUP BY source")}
+    trend = [r[0] for r in conn().execute(
+        f"SELECT o FROM {base} WHERE o IS NOT NULL ORDER BY created_at DESC LIMIT 200", args)][::-1]
+    recent = conn().execute(
+        f"SELECT {LIST_COLS} FROM games {f} ORDER BY created_at DESC LIMIT 10", args).fetchall()
+    return {
+        "totals": totals,
+        "by_source": by_source,
+        "by_opponent": grouped("CASE WHEN opponent = '' THEN '(unnamed)' ELSE opponent END"),
+        "by_color": grouped("COALESCE(my_color, '(n/a)')"),
+        "by_engine": grouped("COALESCE(engine_label, '(no engine)')"),
+        "trend": trend,
+        "recent": [dict(r) for r in recent],
+    }
+
+
+def opponents():
+    return [r[0] for r in conn().execute(
+        "SELECT opponent FROM games WHERE opponent <> '' GROUP BY opponent ORDER BY MAX(created_at) DESC LIMIT 30")]

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+engine/*.exe
+data/*.db
+data/*.db-*
+data/*.log
+data/exports/*
+!data/exports/.gitkeep
+config.json

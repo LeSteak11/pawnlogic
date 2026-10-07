@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess Lab</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">♞ Chess Lab</div>
+  <nav>
+    <button data-tab="analyze" class="active">Analyze</button>
+    <button data-tab="history">History</button>
+    <button data-tab="dashboard">Dashboard</button>
+  </nav>
+  <button id="btn-settings" class="ghost" title="Engine settings">⚙ Settings</button>
+</header>
+
+<main>
+<section id="tab-analyze">
+  <div class="analyze-grid">
+    <div class="left">
+      <div id="banner" class="banner hidden"></div>
+      <div class="turnbar"><span id="turn-dot" class="dot"></span><span id="turn-text"></span><span id="status-text" class="muted"></span></div>
+      <div class="boardwrap"><div id="evalbar"><div id="evalfill"></div></div><div id="board"></div></div>
+      <div class="navrow">
+        <button id="nav-start" title="First (Home)">⏮</button>
+        <button id="nav-prev" title="Back (←)">◀</button>
+        <button id="nav-next" title="Forward (→)">▶</button>
+        <button id="nav-end" title="Last (End)">⏭</button>
+        <span class="spacer"></span>
+        <button id="btn-flip">⇅ Flip</button>
+        <button id="btn-undo">↶ Undo</button>
+        <button id="btn-reset">⟲ Reset</button>
+      </div>
+      <form id="move-form" autocomplete="off">
+        <input id="move-input" placeholder="Type a move (Nf3, e4, e7e8q) — Enter alone plays the best move" spellcheck="false">
+        <button type="submit" class="primary">Play</button>
+      </form>
+    </div>
+    <div class="right">
+      <div class="card rec">
+        <div class="label">Recommended move</div>
+        <div id="best-move">—</div>
+        <div class="evalrow"><span id="best-eval">—</span><span id="best-info" class="muted"></span></div>
+        <div id="cands"></div>
+      </div>
+      <div class="card">
+        <div class="label">Moves</div>
+        <div id="movelist"></div>
+      </div>
+      <details class="card" id="import-card">
+        <summary>Import FEN / PGN</summary>
+        <textarea id="import-text" rows="4" placeholder="Paste a FEN or a PGN here"></textarea>
+        <button id="btn-import" class="primary">Load position</button>
+      </details>
+      <div class="card" id="save-card">
+        <div class="label">Save game</div>
+        <div class="formgrid">
+          <label>Opponent<input id="f-opp" list="opp-list" placeholder="e.g. Chess.com Bot 1200"></label>
+          <datalist id="opp-list"></datalist>
+          <label>I played<select id="f-color"><option value="white">White</option><option value="black">Black</option></select></label>
+          <label>Source<select id="f-source">
+            <option value="assisted">Engine-assisted</option>
+            <option value="independent">Independent (no engine)</option>
+          </select></label>
+          <label>Result<select id="f-result">
+            <option value="auto">Auto (game over)</option>
+            <option value="win">I won</option><option value="loss">I lost</option>
+            <option value="draw">Draw</option><option value="unknown">Unfinished</option>
+          </select></label>
+          <label class="wide">Notes<input id="f-notes" placeholder="optional"></label>
+        </div>
+        <button id="btn-save" class="primary">💾 Save game</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-history" class="hidden">
+  <div class="toolbar">
+    <input id="h-search" placeholder="Search opponent, notes, date, engine…">
+    <select id="h-source"><option value="">All sources</option><option value="assisted">Engine-assisted</option>
+      <option value="independent">Independent</option><option value="experiment">Experiment</option></select>
+    <a class="btn" href="/api/export/pgn" download>Export all PGN</a>
+    <a class="btn" href="/api/export/db" download>Backup database</a>
+  </div>
+  <div class="card tablecard"><table id="h-table"><thead><tr>
+    <th>Date</th><th>Opponent</th><th>Result</th><th>Color</th><th>Moves</th><th>Source</th><th>Engine</th><th></th></tr></thead>
+    <tbody></tbody></table>
+    <div id="h-empty" class="muted pad hidden">No games yet. Play one on the Analyze tab and press Save.</div>
+    <div class="pad"><button id="h-more" class="hidden">Load more</button> <span id="h-count" class="muted"></span></div>
+  </div>
+</section>
+
+<section id="tab-dashboard" class="hidden">
+  <div class="toolbar">
+    <div class="seg" id="d-source">
+      <button data-s="" class="active">All</button><button data-s="assisted">Engine-assisted</button>
+      <button data-s="independent">Independent</button><button data-s="experiment">Experiments</button>
+    </div>
+  </div>
+  <div id="dash"></div>
+</section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" id="settings-form">
+    <h3>Engine settings</h3>
+    <div class="formgrid">
+      <label>Limit by<select name="mode"><option value="time">Time per move</option><option value="depth">Depth</option></select></label>
+      <label>Time (ms)<input name="time_ms" type="number" min="50" step="50"></label>
+      <label>Depth<input name="depth" type="number" min="1" max="60"></label>
+      <label>Candidate lines<input name="multipv" type="number" min="1" max="5"></label>
+      <label>Threads<input name="threads" type="number" min="1" max="32"></label>
+      <label>Hash (MB)<input name="hash_mb" type="number" min="16" step="16"></label>
+      <label>Skill level (0–20)<input name="skill_level" type="number" min="0" max="20"></label>
+      <label>Elo limit (blank = full)<input name="elo" type="number" min="1320" max="3190"></label>
+    </div>
+    <div class="dlgbtns"><button value="cancel" class="ghost">Cancel</button><button value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
