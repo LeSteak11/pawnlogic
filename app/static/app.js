@@ -137,7 +137,10 @@ document.addEventListener("keydown", (e) => {
   else if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key) && !e.ctrlKey && !e.metaKey) $("#move-input").focus();
 });
 
-$("#btn-flip").onclick = () => { S.orient = S.orient === "white" ? "black" : "white"; $("#f-color").value = S.orient; drawBoard(); };
+$("#btn-flip").onclick = () => { S.orient = S.orient === "white" ? "black" : "white"; $("#f-color").value = S.orient; drawBoard(); S.st && analyse(); };
+$("#f-color").onchange = (e) => { S.orient = e.target.value; drawBoard(); S.st && analyse(); };
+$("#only-mine").checked = store.get("cl_onlymine", true);
+$("#only-mine").onchange = (e) => { store.set("cl_onlymine", e.target.checked); S.analysis = null; analyse(); };
 $("#btn-undo").onclick = () => {
   if (!S.plies.length || S.cursor === 0) return;
   S.plies = S.plies.slice(0, S.cursor - 1); S.cursor = S.plies.length; refresh();
@@ -172,6 +175,12 @@ function analyse() {
   clearTimeout(aTimer);
   if (aborter) aborter.abort();
   if (S.st.over) { S.analysis = { fen: curFen(), candidates: [] }; renderAnalysis(false); return; }
+  if ($("#only-mine").checked && !S.viewing && S.st.turn !== S.orient) {
+    S.analysis = { fen: curFen(), candidates: null, waiting: true };
+    $("#best-move").textContent = "Opponent's turn"; $("#best-eval").textContent = "Waiting for their move";
+    $("#best-info").textContent = ""; $("#cands").innerHTML = ""; $("#evalfill").style.height = "50%";
+    drawBoard(); return;
+  }
   renderAnalysis(true);
   aTimer = setTimeout(async () => {
     const fen = curFen(); aborter = new AbortController();
