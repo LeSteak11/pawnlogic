@@ -457,6 +457,32 @@ sform.addEventListener("submit", async (e) => {
   try { await api("/api/config", patch, "PUT"); toast("Settings saved"); S.analysis = null; analyse(); } catch (err) { toast(err.message, true); }
 });
 
+/* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
+let syncSeq = -1, syncBusy = false;
+async function syncTick() {
+  if (syncBusy) return;
+  syncBusy = true;
+  try {
+    const d = await api("/api/sync");
+    const on = $("#sync-on").checked;
+    $("#sync-status").textContent = !on ? "" : d.connected ? "● connected" : "○ waiting for the Chess.com tab";
+    $("#sync-status").style.color = d.connected ? "var(--good)" : "";
+    if (!on || !d.connected || d.seq === syncSeq || !d.placement) return;
+    if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
+    const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
+    const r = await api("/api/sync/apply", { fen: end, placement: d.placement, flipped: d.flipped });
+    syncSeq = d.seq;
+    if (r.mode === "append") {
+      S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh();
+    } else if (r.mode === "reset") {
+      S.orient = r.color; $("#f-color").value = r.color; newGame(r.fen);
+    }
+  } catch {} finally { syncBusy = false; }
+}
+$("#sync-on").checked = store.get("cl_sync", true);
+$("#sync-on").onchange = (e) => { store.set("cl_sync", e.target.checked); syncSeq = -1; syncTick(); };
+setInterval(syncTick, 600);
+
 /* ---------- init ---------- */
 (async function init() {
   const f = store.get("cl_form", {});

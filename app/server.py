@@ -1,6 +1,7 @@
 """Chess Lab local server: JSON API + static UI."""
 import io
 import os
+import re
 import tempfile
 import threading
 import time
@@ -247,6 +248,61 @@ def get_stats(source: str = ""):
 @app.get("/api/opponents")
 def opponents():
     return db.opponents()
+
+
+_sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0}
+_PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
+
+
+@app.post("/api/sync")
+def sync_post(body: dict = Body(...)):
+    """Receives board snapshots from the Chess.com computer-game extension."""
+    pl, fl = body.get("placement"), bool(body.get("flipped"))
+    if not isinstance(pl, str) or not _PLACEMENT.match(pl):
+        bad("bad placement")
+    if pl != _sync["placement"] or fl != _sync["flipped"]:
+        _sync.update(seq=_sync["seq"] + 1, placement=pl, flipped=fl)
+    _sync["at"] = time.time()
+    return {"ok": True}
+
+
+@app.get("/api/sync")
+def sync_get():
+    return {**_sync, "connected": time.time() - _sync["at"] < 4}
+
+
+@app.post("/api/sync/apply")
+def sync_apply(body: dict = Body(...)):
+    """Work out how to get from the app's current position to the board Chess.com shows."""
+    b = make_board(body["fen"])
+    target, color = body["placement"], "black" if body.get("flipped") else "white"
+    if b.board_fen() == target:
+        return {"mode": "same"}
+    for m1 in list(b.legal_moves):  # my move, or the bot's, or both (up to two plies)
+        b.push(m1)
+        if b.board_fen() == target:
+            return {"mode": "append", "plies": timeline(body["fen"], [m1.uci()])}
+        for m2 in list(b.legal_moves):
+            b.push(m2)
+            if b.board_fen() == target:
+                return {"mode": "append", "plies": timeline(body["fen"], [m1.uci(), m2.uci()])}
+            b.pop()
+        b.pop()
+    # Not reachable from here: a new game or a jump. Rebuild the position from the board alone.
+    start = chess.Board()
+    if start.board_fen() == target:
+        return {"mode": "reset", "fen": start.fen(), "color": color}
+    nb = chess.Board(None)
+    try:
+        nb.set_board_fen(target)
+        nb.turn = chess.WHITE if color == "white" else chess.BLACK  # assume it's the user's turn
+        nb.set_castling_fen("KQkq")
+        nb.castling_rights = nb.clean_castling_rights()
+        if not nb.is_valid():
+            return {"mode": "ignore"}
+    except ValueError:
+        return {"mode": "ignore"}
+    return {"mode": "reset", "fen": nb.fen(), "color": color}
 
 
 def exp_view(e):

@@ -22,6 +22,13 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 - `config.json` stores engine settings (also editable under ⚙ Settings).
 - Source types: **assisted** (engine used), **independent** (no engine), **experiment** (engine-vs-engine, Phase 2). Stats are never mixed silently: the Dashboard has a filter. Win % = wins / scored games; unfinished games and experiments aren't scored.
 
+## Auto-sync from Chess.com computer games (optional)
+`extension/` is a small read-only Chrome extension. It runs only on Chess.com's play-the-computer pages, reads which pieces are where, and sends that to Chess Lab on this PC. It never clicks or plays moves.
+1. Chrome > `chrome://extensions` > turn on *Developer mode* > *Load unpacked* > pick the `extension` folder.
+2. Open Chess Lab, leave *Auto-sync from Chess.com* ticked, then start a computer game on Chess.com.
+3. Chess Lab shows "connected", follows both sides' moves, and recommends your move. Don't type moves while sync is on.
+Chess.com can change its page layout, which would break the reader; the manual move box always works as a fallback.
+
 ## Experiments (engine vs engine)
 Experiments tab: name it, set the game count, and configure Engine A and B (time or depth per move, skill level or Elo cap, threads, hash). Defaults: A full strength vs B capped at Elo 1800.
 - Games run one at a time on a background thread; the UI polls once a second and shows a live board. Each finished game is saved immediately (source = experiment) and appears in History.
