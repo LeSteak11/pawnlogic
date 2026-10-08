@@ -27,6 +27,7 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 1. Chrome > `chrome://extensions` > turn on *Developer mode* > *Load unpacked* > pick the `extension` folder.
 2. Open Chess Lab, leave *Auto-sync from Chess.com* ticked, then start a computer game on Chess.com.
 3. Chess Lab shows "connected", follows both sides' moves, and recommends your move. Don't type moves while sync is on.
+Also works on Lichess games against Stockfish ("Stockfish level N") on lichess.org; human games are never read. After updating the extension, click its reload button in the extensions page and refresh the tab.
 Chess.com can change its page layout, which would break the reader; the manual move box always works as a fallback.
 
 ## Experiments (engine vs engine)

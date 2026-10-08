@@ -1,13 +1,25 @@
 {
   "manifest_version": 3,
   "name": "Chess Lab Sync",
-  "version": "1.0",
-  "description": "Sends the board from Chess.com computer games to Chess Lab running on this PC. Read-only.",
-  "host_permissions": ["http://127.0.0.1:8765/*"],
-  "background": { "service_worker": "background.js" },
-  "content_scripts": [{
-    "matches": ["https://www.chess.com/play/computer*", "https://www.chess.com/game/computer/*"],
-    "js": ["content.js"],
-    "run_at": "document_idle"
-  }]
+  "version": "1.1",
+  "description": "Sends the board from Chess.com and Lichess computer games to Chess Lab on this PC. Read-only.",
+  "host_permissions": [
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.chess.com/play/computer*",
+        "https://www.chess.com/game/computer/*",
+        "https://lichess.org/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }
