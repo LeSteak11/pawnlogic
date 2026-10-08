@@ -272,25 +272,51 @@ def opponents():
     return db.opponents()
 
 
-_sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0}
+_sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0, "source": None, "site": None}
+_sources = {}  # one entry per game tab: {placement, flipped, site, at, active_at}
+_sync_cv = threading.Condition()
 _PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
+
+
+def _pick_source():
+    """Follow the game tab you touched last (focused it or a move happened there); drop silent tabs."""
+    now = time.time()
+    for k in [k for k, s in _sources.items() if now - s["at"] > 6]:
+        del _sources[k]
+    if not _sources:
+        return
+    key = max(_sources, key=lambda k: _sources[k]["active_at"])
+    s = _sources[key]
+    if key != _sync["source"] or s["placement"] != _sync["placement"] or s["flipped"] != _sync["flipped"]:
+        _sync.update(seq=_sync["seq"] + 1, placement=s["placement"], flipped=s["flipped"], source=key, site=s["site"])
+        _sync_cv.notify_all()
 
 
 @app.post("/api/sync")
 def sync_post(body: dict = Body(...)):
-    """Receives board snapshots from the Chess.com computer-game extension."""
+    """Receives board snapshots from the Chess.com / Lichess computer-game extension (one stream per tab)."""
     pl, fl = body.get("placement"), bool(body.get("flipped"))
     if not isinstance(pl, str) or not _PLACEMENT.match(pl):
         bad("bad placement")
-    if pl != _sync["placement"] or fl != _sync["flipped"]:
-        _sync.update(seq=_sync["seq"] + 1, placement=pl, flipped=fl)
-    _sync["at"] = time.time()
+    key, now = str(body.get("source") or "default"), time.time()
+    with _sync_cv:
+        s = _sources.setdefault(key, {"placement": None, "flipped": False, "active_at": 0.0})
+        changed = pl != s["placement"] or fl != s["flipped"]
+        s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now)
+        if changed or body.get("focused"):
+            s["active_at"] = now
+        _sync["at"] = now
+        _pick_source()
     return {"ok": True}
 
 
 @app.get("/api/sync")
-def sync_get():
-    return {**_sync, "connected": time.time() - _sync["at"] < 4}
+def sync_get(after: int = -1):
+    """Long-poll: with ?after=<seq>, answers as soon as the synced board changes (or after ~15 s)."""
+    with _sync_cv:
+        if after >= 0:
+            _sync_cv.wait_for(lambda: _sync["seq"] != after, timeout=15)
+        return {**_sync, "connected": time.time() - _sync["at"] < 4, "tabs": len(_sources)}
 
 
 @app.post("/api/sync/apply")

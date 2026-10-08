@@ -168,11 +168,11 @@ $("#board").addEventListener("click", (e) => {
 });
 
 /* ---------- position / render ---------- */
-async function refresh() {
+async function refresh(now = false) {
   selected = null;
   S.st = await api("/api/state", { fen: curFen() });
   drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
-  analyse();
+  analyse(now);
 }
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
 function renderStatus() {
@@ -274,7 +274,7 @@ $("#move-input").addEventListener("keydown", (e) => { if (e.key === "Escape") { 
 /* ---------- analysis ---------- */
 let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
-function analyse() {
+function analyse(now = false) {
   if (E.on) return;
   clearTimeout(aTimer);
   if (aborter) aborter.abort();
@@ -299,7 +299,7 @@ function analyse() {
       if (err.name === "AbortError") return;
       $("#best-move").textContent = "Engine error"; $("#best-info").textContent = err.message;
     }
-  }, 120);
+  }, now ? 0 : 120); // the short wait only batches quick arrow-key stepping
 }
 const PIECE_NAMES = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
 const pov = () => (S.viewing ? "white" : S.orient);
@@ -610,24 +610,26 @@ sform.addEventListener("submit", async (e) => {
 });
 
 /* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
-let syncSeq = -1, syncBusy = false;
-async function syncTick() {
+let syncSeq = -1, syncBusy = false, syncLast = null;
+function renderSyncChip(d) {
+  const on = $("#sync-on").checked, site = d.site === "lichess" ? "Lichess" : d.site === "chess.com" ? "Chess.com" : "game";
+  $("#sync-chip").textContent = d.connected ? `● Synced with ${site} tab` + (d.tabs > 1 ? ` (${d.tabs} open, follows the one you use)` : "")
+    : "○ Waiting for a Chess.com / Lichess computer game";
+  $("#sync-chip").className = "chip " + (d.connected ? "mine" : "opp") + (on ? "" : " hidden");
+}
+async function syncTick(d) {
   if (syncBusy || E.on) return;
   syncBusy = true;
   try {
-    const d = await api("/api/sync");
-    const on = $("#sync-on").checked;
-    const chip = $("#sync-chip");
-    chip.classList.toggle("hidden", !on);
-    chip.textContent = d.connected ? "● Synced with game tab" : "○ Waiting for a Chess.com / Lichess computer game";
-    chip.className = "chip " + (d.connected ? "mine" : "opp") + (on ? "" : " hidden");
-    if (!on || !d.connected || d.seq === syncSeq || !d.placement) return;
+    d = d || await api("/api/sync");
+    syncLast = d; renderSyncChip(d);
+    if (!$("#sync-on").checked || !d.connected || d.seq === syncSeq || !d.placement) return;
     if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
     const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
     const r = await api("/api/sync/apply", { fen: end, placement: d.placement, flipped: d.flipped });
     syncSeq = d.seq;
     if (r.mode === "append") {
-      S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh();
+      S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh(true);
     } else if (r.mode === "reset") {
       S.orient = r.color; $("#f-color").value = r.color; newGame(r.fen);
     }
@@ -635,7 +637,19 @@ async function syncTick() {
 }
 $("#sync-on").checked = store.get("cl_sync", true);
 $("#sync-on").onchange = (e) => { store.set("cl_sync", e.target.checked); syncSeq = -1; syncTick(); };
-setInterval(syncTick, 600);
+// Long-poll: the server answers the moment the game tab's board changes, so a move shows up (and analysis starts) immediately.
+(async function syncLoop() {
+  let seen = -1;
+  for (;;) {
+    try {
+      const d = await api(`/api/sync?after=${seen}`);
+      seen = d.seq;
+      while (syncBusy) await new Promise((res) => setTimeout(res, 30));
+      await syncTick(d);
+    } catch { await new Promise((res) => setTimeout(res, 1000)); }
+  }
+})();
+setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped while reviewing or busy
 
 /* ---------- init ---------- */
 (async function init() {

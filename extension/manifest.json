@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chess Lab Sync",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Sends the board from Chess.com and Lichess computer games to Chess Lab on this PC. Read-only.",
   "host_permissions": [
     "http://127.0.0.1:8765/*"

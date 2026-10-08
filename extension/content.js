@@ -54,15 +54,21 @@ function readLichess() {
 }
 
 const readBoard = IS_LICHESS ? readLichess : readChesscom;
-let last = "", lastSent = 0, timer;
-function push(force) {
+const SITE = IS_LICHESS ? "lichess" : "chess.com";
+let last = "", lastSent = 0, timer = null;
+function push(force, focused = false) {
   const s = readBoard();
   if (!s) return;
   const key = s.placement + s.flipped;
   if (key === last && !force) return;
   last = key; lastSent = Date.now();
-  chrome.runtime.sendMessage(s);
+  chrome.runtime.sendMessage({ ...s, site: SITE, focused });
 }
-new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(() => push(false), 150); })
+// Read soon after the board changes, but never let a busy page (clocks, animations) starve the read.
+new MutationObserver(() => { if (!timer) timer = setTimeout(() => { timer = null; push(false); }, 60); })
   .observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
 setInterval(() => push(Date.now() - lastSent > 2000), 1000); // heartbeat so Chess Lab can show "connected"
+// Switching to this tab makes it the game Chess Lab follows.
+const claim = () => { if (document.visibilityState === "visible") push(true, true); };
+window.addEventListener("focus", claim);
+document.addEventListener("visibilitychange", claim);

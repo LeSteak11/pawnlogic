@@ -99,6 +99,7 @@ class StockfishEngine(Engine):
         self.gen = 0          # newest request wins; older searches stop early
         self.proc = None
         self.opts_key = None
+        self.cache = {}       # (fen, settings) -> result, so revisiting a position is instant
 
     def _ensure(self, cfg):
         key = (str(engine_path(cfg)), json.dumps(uci_options(cfg), sort_keys=True))
@@ -117,6 +118,9 @@ class StockfishEngine(Engine):
             self.proc = None
 
     def analyse(self, board, cfg):
+        ckey = (board.fen(), json.dumps(cfg, sort_keys=True))
+        if ckey in self.cache:
+            return self.cache[ckey]
         self.gen += 1
         mine = self.gen
         with self.lock:
@@ -152,7 +156,11 @@ class StockfishEngine(Engine):
                 b.push(mv)
             cands.append({"uci": pv[0].uci(), "san": sans[0], "pv": sans, "score": fmt_score(info["score"]),
                           "depth": info.get("depth", 0)})
-        return {"candidates": cands, "depth": max((c["depth"] for c in cands), default=0)}
+        res = {"candidates": cands, "depth": max((c["depth"] for c in cands), default=0)}
+        if len(self.cache) > 500:
+            self.cache.clear()
+        self.cache[ckey] = res
+        return res
 
 
 ENGINES = {"stockfish": StockfishEngine}
