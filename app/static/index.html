@@ -6,7 +6,7 @@
 <title>Chess Lab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 <header>
@@ -25,7 +25,7 @@
   <div class="analyze-grid">
     <div class="left">
       <div id="banner" class="banner hidden"></div>
-      <div id="statusbar"><span id="turn-chip" class="chip"></span><span id="sync-chip" class="chip hidden"></span></div>
+      <div id="statusbar"><span id="turn-chip" class="chip"></span><span id="sync-chip" class="chip hidden"></span><span id="clock-chip" class="chip clockchip hidden"></span></div>
       <div class="optrow">
         <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess computer games)</label>
         <label><input type="checkbox" id="only-mine"> Only recommend on my turn</label>
@@ -63,7 +63,10 @@
     <div class="right">
       <div class="card stylecard">
         <div class="srow"><span class="label">Style</span><div class="seg" id="style-seg"></div>
+          <button id="blitz-btn" class="blitz-btn" aria-pressed="false" title="Blitz mode: faster answers, simpler moves, compact card">⚡ Blitz</button>
           <label id="style-cost-wrap" class="costlbl">may cost up to <select id="style-cost"><option value="1">1%</option><option value="3">3%</option><option value="6">6%</option></select></label></div>
+        <div class="srow lvlrow"><span class="label">Strength</span><input id="level" type="range" min="0" max="4" step="1" dir="rtl" aria-label="Recommendation strength">
+          <span id="level-name" class="lvlname">Max</span><span class="muted tiny">grading stays full strength</span></div>
         <details id="op-card"><summary><span class="label">Openings</span> <span id="op-sum" class="muted"></span></summary>
           <div class="opgrid">
             <label>As White<select id="op-white"></select></label>
@@ -79,6 +82,7 @@
           <div id="last-grade" class="lastgrade muted"></div>
         </div>
         <div id="rec-head" class="rec-head"></div>
+        <div id="clock-warn" class="clockwarn hidden"></div>
         <div id="best-move">—</div>
         <div id="best-desc" class="muted"></div>
         <div id="best-eval"></div>
@@ -173,6 +177,6 @@
 </dialog>
 <div id="toast"></div>
 <script src="/static/openings.js?v=1"></script>
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>

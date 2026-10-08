@@ -172,7 +172,7 @@ $("#board").addEventListener("click", (e) => {
 async function refresh(now = false) {
   selected = null; S.pick = -1;
   S.st = await api("/api/state", { fen: curFen() });
-  drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
+  drawBoard(); renderStatus(); renderMoves(); updateSaveForm(); renderClockWarn();
   analyse(now);
 }
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
@@ -304,7 +304,7 @@ function analyse(now = false) {
     const watchdog = setTimeout(() => ctl.abort("timeout"), 10000); // never sit on "Calculating"
     try {
       for (let tries = 0; ; tries++) {
-        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen, multipv: PREF.style !== "balanced" ? 5 : undefined }), signal: ctl.signal });
+        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen, multipv: wantsMore() ? 5 : undefined, time_ms: thinkMs() }), signal: ctl.signal });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail);
         if (fen !== curFen()) return;
@@ -403,7 +403,14 @@ function renderWin(score) {
 }
 /* ---------- play style + opening book (pick among the engine's good moves; the engine itself is unchanged) ---------- */
 const STYLES = { balanced: "Balanced", aggressive: "Aggressive", solid: "Solid", simple: "Simple" };
-const PREF = { style: store.get("cl_style", "balanced"), cost: store.get("cl_style_cost", 3), ops: store.get("cl_openings", { white: "", e4: "", d4: "" }) };
+const PREF = { style: store.get("cl_style", "balanced"), cost: store.get("cl_style_cost", 3), ops: store.get("cl_openings", { white: "", e4: "", d4: "" }),
+  blitz: store.get("cl_blitz", false), level: store.get("cl_level", 0) };
+// Strength: 0 = Max (always the best). Lower levels deliberately recommend weaker options; grading stays full strength.
+const LEVELS = [{ name: "Max", win: 0 }, { name: "2200", win: 4 }, { name: "1800", win: 8 }, { name: "1500", win: 14 }, { name: "1200", win: 22 }];
+const effStyle = () => (PREF.blitz && PREF.style === "balanced" ? "simple" : PREF.style); // blitz leans to quick, clear moves
+const effCost = () => (PREF.blitz ? Math.min(PREF.cost, 2) : PREF.cost);
+const wantsMore = () => effStyle() !== "balanced" || PREF.level > 0; // choosing among options needs 5 of them
+function hash01(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return (h >>> 0) / 4294967296; }
 const normSan = (s) => s.replace(/[+#!?]/g, "");
 const sqXY = (s) => ["abcdefgh".indexOf(s[0]), +s[1] - 1];
 const cheb = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
@@ -446,15 +453,21 @@ function styleScore(style, f) {
 }
 // Returns { idx, why } — which engine candidate the chosen style recommends.
 function stylePick(info, fen, mover) {
-  if (PREF.style === "balanced" || info.length < 2) return { idx: 0, why: "" };
+  if (PREF.level > 0 && info.length > 1) { // weaker on purpose: stable per position, varied across positions
+    const L = LEVELS[PREF.level], target = hash01(fen + PREF.level) * L.win;
+    let idx = 0; info.forEach((o, i) => { if (o.loss <= L.win && Math.abs(o.loss - target) < Math.abs(info[idx].loss - target)) idx = i; });
+    return { idx, why: `Level ${L.name} pick` + (info[idx].loss >= 0.5 ? ` (−${info[idx].loss.toFixed(1)}% vs best)` : "") };
+  }
+  const style = effStyle();
+  if (style === "balanced" || info.length < 2) return { idx: 0, why: "" };
   let best = { idx: 0, val: -Infinity, hits: [] };
   info.forEach((o, i) => {
-    if (o.loss > PREF.cost) return;
-    const { s, hits } = styleScore(PREF.style, moveFeatures(o.c, fen, mover, o.w));
+    if (o.loss > effCost()) return;
+    const { s, hits } = styleScore(style, moveFeatures(o.c, fen, mover, o.w));
     const val = s - o.loss * 0.3;
     if (val > best.val + 1e-9) best = { idx: i, val, hits };
   });
-  const name = STYLES[PREF.style], o = info[best.idx], what = best.hits.map((k) => FEATURE_WORDS[k]).slice(0, 2).join(", ");
+  const name = (PREF.blitz ? "⚡ " : "") + STYLES[style], o = info[best.idx], what = best.hits.map((k) => FEATURE_WORDS[k]).slice(0, 2).join(", ");
   return { idx: best.idx, why: best.idx === 0 ? `${name}: the engine's best already fits${what ? ` (${what})` : ""}` : `${name} pick: ${what || "fits the style"} (−${o.loss.toFixed(1)}% vs engine best)` };
 }
 function repertoireFor() {
@@ -532,7 +545,7 @@ function renderAnalysis(busy) {
   else { $("#best-eval").textContent = "Book move · engine still thinking"; $("#best-eval").className = "evtag even"; }
   $("#best-info").textContent = ok ? `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side` : "";
   renderWin(cands.length ? cands[0].score : null);
-  const left = book && book.left ? `<div class="booknote">Opponent left the ${esc(book.name)} at move ${book.moveNo}: engine${PREF.style !== "balanced" ? ` + ${STYLES[PREF.style]}` : ""} from here</div>` : "";
+  const left = book && book.left ? `<div class="booknote">Opponent left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "balanced" ? ` + ${STYLES[effStyle()]}` : ""} from here</div>` : "";
   $("#cands").innerHTML = left + `<div class="candhead">Move options <span>↑ ↓ to switch · Enter to play</span></div>` + info.map((o, i) => {
     const { c, w, grade } = o, engineTop = !o.book && c === cands[0];
     const tags = (i === rec.idx ? `<span class="tag rec-tag">Recommended</span>` : "") + (o.book ? `<span class="tag book-tag">Book</span>` : "")
@@ -577,7 +590,7 @@ function updateSaveForm() {
 $("#btn-save").onclick = async () => {
   if (!S.plies.length) return toast("Nothing to save: no moves yet.", true);
   const body = {
-    start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), opponent: $("#f-opp").value, my_color: $("#f-color").value,
+    start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), opponent: $("#f-opp").value, my_color: $("#f-color").value,
     source: $("#f-source").value, result: $("#f-result").value, notes: $("#f-notes").value,
     id: S.gameId, site: S.live.site,
   };
@@ -606,14 +619,14 @@ function renderBanner() {
 /* ---------- unsaved-game draft (survives closing the window) ---------- */
 function persistDraft() {
   if (S.viewing) return;
-  store.set("cl_draft", S.plies.length ? { startFen: S.startFen, ucis: S.plies.map((p) => p.uci), orient: S.orient, cursor: S.cursor, gameId: S.gameId, gameFinal: S.gameFinal, live: S.live } : null);
+  store.set("cl_draft", S.plies.length ? { startFen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), orient: S.orient, cursor: S.cursor, gameId: S.gameId, gameFinal: S.gameFinal, live: S.live } : null);
 }
 
 /* ---------- auto-save: every game (4+ plies) is kept in History and updated as moves come in ---------- */
 let asTimer = null, asPending = null, asBusy = false, gameNo = 0;
 function autosaveSnapshot() {
   if (S.viewing || S.gameFinal || E.on || S.plies.length < 4) return null;
-  return { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), my_color: S.orient, source: "assisted",
+  return { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), my_color: S.orient, source: "assisted",
     opponent: S.live.opponent || $("#f-opp").value, site: S.live.site, game: gameNo };
 }
 function scheduleAutosave() {
@@ -845,7 +858,7 @@ async function syncTick(d) {
   syncBusy = true;
   try {
     d = d || await api("/api/sync");
-    syncLast = d; renderSyncChip(d);
+    syncLast = d; renderSyncChip(d); updateClock(d);
     if (!$("#sync-on").checked || !d.connected || d.seq === syncSeq || !d.placement) return;
     if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
     const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
@@ -858,6 +871,8 @@ async function syncTick(d) {
     farSince = null; syncSeq = d.seq;
     if (d.site) S.live = { site: d.site, opponent: d.opponent || S.live.opponent };
     if (r.mode === "append") {
+      const lastP = r.plies[r.plies.length - 1], mover = sideOf(lastP.fen) === "white" ? "black" : "white";
+      lastP.clk = mover === S.orient ? d.my_clock : d.opp_clock; // time left after that move (saved as [%clk])
       S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh(true);
     } else if (r.mode === "reset") {
       S.orient = r.color; $("#f-color").value = r.color; newGame(r.fen);
@@ -896,6 +911,7 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
       S.orient = d.orient || "white"; $("#f-color").value = S.orient;
       S.startFen = t.start_fen; S.plies = t.plies; S.cursor = Math.min(d.cursor ?? t.plies.length, t.plies.length);
       S.gameId = d.gameId || null; S.gameFinal = !!d.gameFinal; if (d.live) S.live = d.live;
+      (d.clocks || []).forEach((c, i) => { if (S.plies[i] && c != null) S.plies[i].clk = c; });
       toast("Restored your unsaved game");
     } catch { clearDraft(); }
   }
@@ -927,4 +943,48 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
     sel.onchange = () => { PREF.ops[k] = sel.value; store.set("cl_openings", PREF.ops); paint(); S.pick = -1; if (S.st) renderAnalysis(false), drawBoard(); };
   }
   paint();
+})();
+
+/* ---------- clocks, blitz mode, strength ---------- */
+const CLK = { my: null, opp: null, at: 0 };
+let autoBlitzGame = -1;
+const fmtClock = (t) => { t = Math.max(0, t); const m = Math.floor(t / 60), sec = t - m * 60; return t < 20 ? `${m}:${sec.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.floor(sec)).padStart(2, "0")}`; };
+const clockLive = () => !S.viewing && CLK.my != null && Date.now() - CLK.at < 5000;
+function thinkMs() { // full search normally; quicker in blitz and when your clock is low
+  const my = clockLive() ? CLK.my : null;
+  if (my != null && my < 10) return 150;
+  if (my != null && my < 30) return 300;
+  return PREF.blitz ? 500 : undefined;
+}
+function updateClock(d) {
+  CLK.my = d.my_clock ?? null; CLK.opp = d.opp_clock ?? null; CLK.at = Date.now();
+  const chip = $("#clock-chip"), on = d.connected && CLK.my != null;
+  chip.classList.toggle("hidden", !on || !!S.viewing);
+  if (on) {
+    chip.textContent = `⏱ You ${fmtClock(CLK.my)} · Opp ${CLK.opp != null ? fmtClock(CLK.opp) : "—"}`;
+    chip.classList.toggle("low", CLK.my < 15);
+    // short time control at the start of a game: switch blitz on once (you can switch it off again)
+    if (!PREF.blitz && CLK.my <= 300 && S.plies.length <= 2 && autoBlitzGame !== gameNo) { autoBlitzGame = gameNo; setBlitz(true); toast("⚡ Blitz mode on (short clock). Tap ⚡ Blitz to turn it off."); }
+  }
+  renderClockWarn();
+}
+function renderClockWarn() {
+  const el = $("#clock-warn"), mine = S.st && !S.viewing && S.st.turn === S.orient && !S.st.over;
+  const low = clockLive() && mine && CLK.my < 15;
+  el.classList.toggle("hidden", !low);
+  if (low) el.textContent = `⏱ ${Math.ceil(CLK.my)}s left: play fast`;
+}
+function setBlitz(on) {
+  PREF.blitz = on; store.set("cl_blitz", on);
+  document.body.classList.toggle("blitz", on);
+  $("#blitz-btn").classList.toggle("on", on); $("#blitz-btn").setAttribute("aria-pressed", on);
+  if (S.st) { S.pick = -1; S.analysis = null; analyse(true); }
+}
+$("#blitz-btn").onclick = () => { autoBlitzGame = gameNo; setBlitz(!PREF.blitz); };
+document.body.classList.toggle("blitz", PREF.blitz); $("#blitz-btn").classList.toggle("on", PREF.blitz);
+(function initLevel() {
+  const r = $("#level"), paint = () => { $("#level-name").textContent = LEVELS[PREF.level].name; r.classList.toggle("weak", PREF.level > 0); };
+  r.value = String(PREF.level); paint();
+  r.oninput = () => { PREF.level = +r.value; store.set("cl_level", PREF.level); paint(); };
+  r.onchange = () => { S.pick = -1; S.analysis = null; if (S.st) analyse(true); };
 })();

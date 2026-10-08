@@ -137,6 +137,8 @@ def analyse(body: dict = Body(...)):
     cfg = load_config()
     if isinstance(body.get("multipv"), int) and 1 <= body["multipv"] <= 8:
         cfg["multipv"] = body["multipv"]  # a play style asks for a few more options to choose from
+    if isinstance(body.get("time_ms"), int) and 50 <= body["time_ms"] <= 10000:
+        cfg["mode"], cfg["time_ms"] = "time", body["time_ms"]  # short on the clock / blitz: answer faster
     try:
         return engine.analyse(b, cfg)
     except Exception as e:  # engine missing/crashed: surface to the UI
@@ -184,11 +186,14 @@ def _game_record(body, auto_result):
     game = chess.pgn.Game()
     game.setup(b)
     node = game
-    for u in body["ucis"]:
+    clocks = body.get("clocks") or []
+    for i, u in enumerate(body["ucis"]):
         mv = chess.Move.from_uci(u)
         if mv not in b.legal_moves:
             bad(f"Illegal move {u}")
         node = node.add_variation(mv)
+        if i < len(clocks) and _secs(clocks[i]) is not None:
+            node.set_clock(clocks[i])  # time left after this move, as a [%clk] comment
         b.push(mv)
     my_color = body.get("my_color") or None
     source = body.get("source", "assisted")
@@ -304,6 +309,10 @@ _sync_cv = threading.Condition()
 _PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
 
 
+def _secs(v):
+    return float(v) if isinstance(v, (int, float)) and 0 <= v < 100000 else None
+
+
 def _pick_source():
     """Follow the game tab you touched last (focused it or a move happened there); drop silent tabs."""
     now = time.time()
@@ -317,6 +326,7 @@ def _pick_source():
         _sync.update(seq=_sync["seq"] + 1, placement=s["placement"], flipped=s["flipped"], source=key, site=s["site"])
         _sync_cv.notify_all()
     _sync["opponent"] = s.get("opponent") or ""
+    _sync["my_clock"], _sync["opp_clock"] = s.get("my_clock"), s.get("opp_clock")
 
 
 @app.post("/api/sync")
@@ -330,7 +340,8 @@ def sync_post(body: dict = Body(...)):
         s = _sources.setdefault(key, {"placement": None, "flipped": False, "active_at": 0.0})
         changed = pl != s["placement"] or fl != s["flipped"]
         s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now,
-                 opponent=str(body.get("opponent") or s.get("opponent") or "")[:60])
+                 opponent=str(body.get("opponent") or s.get("opponent") or "")[:60],
+                 my_clock=_secs(body.get("my_clock")), opp_clock=_secs(body.get("opp_clock")))
         if changed or body.get("focused"):
             s["active_at"] = now
         _sync["at"] = now

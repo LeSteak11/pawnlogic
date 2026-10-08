@@ -203,3 +203,27 @@ input:focus,select:focus,textarea:focus{outline:2px solid #3f6b54}
 .book-tag{background:rgba(143,163,173,.16);color:#a9b8c0}
 .eng-tag{background:rgba(143,153,159,.12);color:var(--muted)}
 .booknote{font-size:13px;color:var(--draw);margin:2px 0 6px}
+/* clock */
+.clockchip{font-variant-numeric:tabular-nums}
+.clockchip.low{border-color:var(--bad);color:var(--bad)}
+.clockwarn{font-size:14px;font-weight:600;color:var(--bad);margin:2px 0 6px}
+/* strength slider */
+.lvlrow{margin-top:10px}
+#level{width:150px;padding:0;accent-color:var(--accent);background:none;border:0}
+#level.weak{accent-color:var(--draw)}
+.lvlname{font-weight:600;font-variant-numeric:tabular-nums;min-width:38px}
+/* blitz toggle */
+.blitz-btn{padding:5px 12px;font-size:14px;margin-left:auto;transition:background-color .2s,border-color .2s,color .2s}
+.blitz-btn.on{background:rgba(199,166,86,.14);border-color:#a8893f;color:#e2c47a;animation:blitzGlow 2.4s ease-in-out infinite}
+@keyframes blitzGlow{0%,100%{box-shadow:0 0 0 0 rgba(226,196,122,0)}50%{box-shadow:0 0 0 3px rgba(226,196,122,.14)}}
+/* blitz on: a slow light sweep along the top of the recommendation card, compact options */
+body.blitz .card.rec{position:relative;overflow:hidden}
+body.blitz .card.rec::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;
+  background:linear-gradient(90deg,transparent 0%,rgba(226,196,122,.0) 30%,rgba(226,196,122,.75) 50%,rgba(226,196,122,0) 70%,transparent 100%);
+  background-size:200% 100%;animation:blitzSweep 2.8s linear infinite}
+@keyframes blitzSweep{from{background-position:100% 0}to{background-position:-100% 0}}
+body.blitz .rec #best-move{font-size:50px;padding-top:12px}
+body.blitz #best-info,body.blitz .cdesc,body.blitz .candhead span{display:none}
+body.blitz .cand{padding:6px 10px;margin-bottom:4px}
+body.blitz .cbar{margin:5px 0 0}
+@media (prefers-reduced-motion:reduce){.blitz-btn.on,body.blitz .card.rec::before{animation:none}}

@@ -56,16 +56,28 @@ function readLichess() {
   return placement && { placement, flipped: black, opponent: top.textContent.trim().replace(/\s+/g, " ").slice(0, 60) };
 }
 
+// Clocks: bottom = your side, top = the opponent. Seconds, or null when the game has no clock.
+function clockSecs(el) {
+  const m = el && el.textContent.trim().match(/^(?:(\d+):)?(\d+):(\d+)(?:[.,](\d))?$/);
+  return m ? (+m[1] || 0) * 3600 + +m[2] * 60 + +m[3] + (m[4] ? +m[4] / 10 : 0) : null;
+}
+function readClocks() {
+  const q = (s) => document.querySelector(s);
+  return IS_LICHESS
+    ? { my_clock: clockSecs(q(".rclock-bottom .time")), opp_clock: clockSecs(q(".rclock-top .time")) }
+    : { my_clock: clockSecs(q(".clock-bottom .clock-time-monospace, .clock-bottom")), opp_clock: clockSecs(q(".clock-top .clock-time-monospace, .clock-top")) };
+}
+
 const readBoard = IS_LICHESS ? readLichess : readChesscom;
 const SITE = IS_LICHESS ? "lichess" : "chess.com";
-let last = "", lastSent = 0, timer = null;
+let last = "", lastClock = "", lastSent = 0, timer = null;
 function push(force, focused = false) {
   const s = readBoard();
   if (!s) return;
-  const key = s.placement + s.flipped;
-  if (key === last && !force) return;
-  last = key; lastSent = Date.now();
-  chrome.runtime.sendMessage({ ...s, site: SITE, focused });
+  const key = s.placement + s.flipped, clk = readClocks(), ck = clk.my_clock + "|" + clk.opp_clock;
+  if (key === last && !force && !(ck !== lastClock && Date.now() - lastSent > 900)) return; // clocks: about once a second
+  last = key; lastClock = ck; lastSent = Date.now();
+  chrome.runtime.sendMessage({ ...s, ...clk, site: SITE, focused });
 }
 // Read soon after the board changes, but never let a busy page (clocks, animations) starve the read.
 new MutationObserver(() => { if (!timer) timer = setTimeout(() => { timer = null; push(false); }, 60); })
