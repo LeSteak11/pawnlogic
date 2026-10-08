@@ -242,3 +242,46 @@ body.blitz .card,body.blitz .tile{transition:background-color .9s,border-color .
 @keyframes goldFlash{0%{opacity:0}14%{opacity:.62}100%{opacity:0}}
 .brand{display:inline-flex;align-items:center;gap:9px}
 .brand-icon{width:28px;height:28px;display:block}
+
+/* ===== Stable layout: nothing moves between turns, board always fits the window ===== */
+html{scrollbar-gutter:stable}
+.invis{visibility:hidden !important}
+main{max-width:1640px}
+.fade{animation:txtFade .14s ease-out}
+@keyframes txtFade{from{opacity:.35}to{opacity:1}}
+.winpct,.cw,#moves-count,.acc,.clockchip,.lvlname{font-variant-numeric:tabular-nums}
+@media (min-width:761px){
+  /* left column = board + its controls, sized so the whole board fits the window height */
+  .analyze-grid{grid-template-columns:minmax(300px,min(calc(100dvh - 236px),calc(100vw - 440px))) minmax(330px,500px);justify-content:center;gap:18px}
+  .right{position:sticky;top:12px;max-height:calc(100dvh - 24px);overflow-y:auto;scrollbar-gutter:stable;padding-right:4px}
+}
+@media (max-width:760px){.hint-wide{display:none}}
+#statusbar{flex-wrap:nowrap;overflow:hidden;min-height:36px}
+#statusbar .chip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex-shrink:1}
+#statusbar #turn-chip{flex-shrink:0}
+.optrow{min-height:24px}
+/* recommendation card: every row has a fixed height */
+.card.rec{position:relative}
+.winbox{height:82px;overflow:hidden}
+.winrow{height:36px;white-space:nowrap;overflow:hidden}
+.lastgrade{height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rec-head{height:18px;line-height:18px;white-space:nowrap;overflow:hidden}
+#clock-warn{position:absolute;right:16px;top:96px;margin:0;line-height:18px}
+.rec #best-move,body.blitz .rec #best-move{height:70px;line-height:52px;white-space:nowrap;overflow:hidden}
+#best-desc{height:48px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#best-eval{min-height:30px;height:30px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#best-info{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.blitz #best-info{display:block;visibility:hidden}
+.candhead{height:20px;white-space:nowrap;overflow:hidden}
+.candhead span{overflow:hidden;text-overflow:ellipsis;margin-left:10px}
+.candhead .booknote{color:var(--draw);font-size:12px;margin:0 0 0 10px}
+.cand{height:80px;overflow:hidden}
+body.blitz .cand{height:44px}
+.ctop{white-space:nowrap;overflow:hidden}
+.cand.ph{background:transparent;border-style:dashed;opacity:.35;cursor:default}
+#cands.stale .cand{opacity:.45;pointer-events:none;transition:opacity .15s}
+/* moves card: fixed list height, fixed footer slots */
+#movelist,#movelist.empty{height:220px;max-height:none;overflow-y:auto}
+#moves-note{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.endrow{height:32px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
+.srow{min-height:34px}

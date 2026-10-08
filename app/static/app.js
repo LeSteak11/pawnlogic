@@ -394,7 +394,7 @@ function renderWin(score) {
   $("#winbox").classList.toggle("stale", !score);
   if (!score) return;
   const side = pov(), p = winPct(score, side), col = winColor(p);
-  $("#win-pct").textContent = isMate(score) ? `Mate in ${mateIn(score)}` : Math.round(p) + "%";
+  setText($("#win-pct"), isMate(score) ? `Mate in ${mateIn(score)}` : Math.round(p) + "%");
   $("#win-pct").style.color = col;
   $("#win-label").textContent = isMate(score) ? (p > 50 ? (S.viewing ? `for ${cap(side)}` : "for you") : (S.viewing ? `against ${cap(side)}` : "against you"))
     : S.viewing ? `win chance (${cap(side)})` : "win chance (you)";
@@ -516,10 +516,20 @@ function cyclePick(d) {
   S.pick = ((S.pick < 0 ? S.recIdx : S.pick) + d + n) % n;
   renderAnalysis(false); drawBoard();
 }
+function setText(el, t) { // swap text with a short fade instead of a pop
+  if (el.textContent === t) return;
+  el.textContent = t; el.classList.remove("fade"); void el.offsetWidth; el.classList.add("fade");
+}
+const candHead = (note) => `<div class="candhead">Move options <span${note ? ' class="booknote"' : ""}>${note || "↑ ↓ to switch · Enter to play"}</span></div>`;
+function holdCands() { // keep the previous options where they are (dimmed) so nothing below moves
+  const c = $("#cands");
+  if (c.querySelector(".cand:not(.ph)")) c.classList.add("stale");
+  else { c.classList.remove("stale"); c.innerHTML = candHead("") + Array.from({ length: wantsMore() ? 5 : 3 }, () => `<div class="cand ph"></div>`).join(""); }
+}
 function clearRec(big, sub) {
-  $("#best-move").textContent = big; $("#best-desc").textContent = sub || "";
+  setText($("#best-move"), big); $("#best-desc").textContent = sub || "";
   $("#best-eval").textContent = ""; $("#best-eval").className = ""; $("#best-info").textContent = "";
-  $("#cands").innerHTML = ""; renderWin(null);
+  holdCands(); renderWin(null);
 }
 function renderAnalysis(busy) {
   const a = S.analysis, ok = a && a.fen === curFen() && a.candidates;
@@ -539,14 +549,15 @@ function renderAnalysis(busy) {
   S.opts = info; S.optsFen = curFen(); S.recIdx = rec.idx;
   const pick = S.pick >= 0 && S.pick < info.length ? S.pick : rec.idx, p = info[pick].c;
   const only = info.length > 1 && cands.length > 1 && winPct(cands[0].score, mover) - winPct(cands[1].score, mover) >= 10;
-  $("#best-move").textContent = p.san;
+  $("#cands").classList.remove("stale");
+  setText($("#best-move"), p.san);
   $("#best-desc").textContent = moveDesc(p) + (pick === rec.idx && rec.why ? ` · ${rec.why}` : "");
   if (p.score) { $("#best-eval").textContent = `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score); }
   else { $("#best-eval").textContent = "Book move · engine still thinking"; $("#best-eval").className = "evtag even"; }
   $("#best-info").textContent = ok ? `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side` : "";
   renderWin(cands.length ? cands[0].score : null);
-  const left = book && book.left ? `<div class="booknote">Opponent left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "balanced" ? ` + ${STYLES[effStyle()]}` : ""} from here</div>` : "";
-  $("#cands").innerHTML = left + `<div class="candhead">Move options <span>↑ ↓ to switch · Enter to play</span></div>` + info.map((o, i) => {
+  const left = book && book.left ? `Left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "balanced" ? ` + ${STYLES[effStyle()]}` : ""} from here` : "";
+  $("#cands").innerHTML = candHead(left) + info.map((o, i) => {
     const { c, w, grade } = o, engineTop = !o.book && c === cands[0];
     const tags = (i === rec.idx ? `<span class="tag rec-tag">Recommended</span>` : "") + (o.book ? `<span class="tag book-tag">Book</span>` : "")
       + (engineTop && i !== rec.idx ? `<span class="tag eng-tag">Engine #1</span>` : "") + (engineTop && only ? `<span class="tag only-tag">Only move</span>` : "");
@@ -582,7 +593,7 @@ function updateSaveForm() {
   if (!n) sc.open = false;
   wasOver = S.st.over;
   $("#save-card").classList.toggle("hidden", !!S.viewing);
-  $("#endrow").classList.toggle("hidden", !!S.viewing || !n || S.st.over || S.gameFinal);
+  $("#endrow").classList.toggle("invis", !!S.viewing || !n || S.st.over || S.gameFinal);
   const auto = $("#f-result").querySelector('[value="auto"]');
   auto.disabled = !(S.st && S.st.over && S.cursor === S.plies.length);
   if (auto.disabled && $("#f-result").value === "auto") $("#f-result").value = "win";
@@ -937,7 +948,7 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
   seg.innerHTML = Object.entries(STYLES).map(([k, v]) => `<button data-style="${k}">${v}</button>`).join("");
   const paint = () => {
     seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.style === PREF.style));
-    $("#style-cost-wrap").classList.toggle("hidden", PREF.style === "balanced");
+    $("#style-cost-wrap").classList.toggle("invis", PREF.style === "balanced");
     const names = [["white", "White"], ["e4", "vs e4"], ["d4", "vs d4"]].filter(([k]) => PREF.ops[k]).map(([k, l]) => `${l}: ${OPENINGS[k][PREF.ops[k]].name}`);
     $("#op-sum").textContent = names.length ? names.join(" · ") : "engine chooses";
   };
