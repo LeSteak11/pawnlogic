@@ -23,10 +23,13 @@
   <div class="analyze-grid">
     <div class="left">
       <div id="banner" class="banner hidden"></div>
-      <div class="turnbar"><span id="turn-dot" class="dot"></span><span id="turn-text"></span><span id="status-text" class="muted"></span></div>
-      <label class="syncbox"><input type="checkbox" id="sync-on"> Auto-sync from Chess.com <span id="sync-status" class="muted"></span></label>
-      <label class="syncbox"><input type="checkbox" id="only-mine"> Only recommend on my turn (I play the bottom color)</label>
-      <div class="boardwrap"><div id="evalbar"><div id="evalfill"></div></div><div id="board"></div></div>
+      <div id="statusbar"><span id="turn-chip" class="chip"></span><span id="sync-chip" class="chip hidden"></span></div>
+      <div class="optrow">
+        <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess computer games)</label>
+        <label><input type="checkbox" id="only-mine"> Only recommend on my turn</label>
+        <span class="muted tiny">You play the bottom color of the board.</span>
+      </div>
+      <div class="boardwrap"><div id="evalbar"><span class="el">Opp</span><div class="evtrack"><div id="evalfill"></div></div><span class="el">You</span></div><div id="board"></div></div>
       <div class="navrow">
         <button id="nav-start" title="First (Home)">⏮</button>
         <button id="nav-prev" title="Back (←)">◀</button>
@@ -57,22 +60,26 @@
     </div>
     <div class="right">
       <div class="card rec">
-        <div class="label">Recommended move</div>
+        <div id="rec-head" class="rec-head"></div>
         <div id="best-move">—</div>
-        <div class="evalrow"><span id="best-eval">—</span><span id="best-info" class="muted"></span></div>
+        <div id="best-desc" class="muted"></div>
+        <div id="best-eval"></div>
+        <div id="best-info" class="muted tiny"></div>
         <div id="cands"></div>
       </div>
       <div class="card">
-        <div class="label">Moves</div>
-        <div id="movelist"></div>
+        <div class="label">Moves <span id="moves-count"></span></div>
+        <div id="movelist" class="movelist"></div>
+        <div id="moves-note" class="muted tiny"></div>
       </div>
       <details class="card" id="import-card">
         <summary>Import FEN / PGN</summary>
         <textarea id="import-text" rows="4" placeholder="Paste a FEN or a PGN here"></textarea>
         <button id="btn-import" class="primary">Load position</button>
       </details>
-      <div class="card" id="save-card">
-        <div class="label">Save game</div>
+      <details class="card" id="save-card">
+        <summary><span class="label" style="margin:0;display:inline">Save game</span> <span id="save-sum" class="muted"></span></summary>
+        <div style="height:10px"></div>
         <div class="formgrid">
           <label>Opponent<input id="f-opp" list="opp-list" placeholder="e.g. Chess.com Bot 1200"></label>
           <datalist id="opp-list"></datalist>
@@ -89,7 +96,7 @@
           <label class="wide">Notes<input id="f-notes" placeholder="optional"></label>
         </div>
         <button id="btn-save" class="primary">💾 Save game</button>
-      </div>
+      </details>
     </div>
   </div>
 </section>
