@@ -171,8 +171,12 @@ def import_text(body: dict = Body(...)):
 RESULT_FROM_CHOICE = {"draw": "1/2-1/2", "unknown": "*"}
 
 
-@app.post("/api/games")
-def save_game(body: dict = Body(...)):
+ENDED = {"CHECKMATE": "checkmate", "STALEMATE": "stalemate", "INSUFFICIENT_MATERIAL": "insufficient material",
+         "SEVENTYFIVE_MOVES": "75-move rule", "FIVEFOLD_REPETITION": "repetition", "FIFTY_MOVES": "50-move rule",
+         "THREEFOLD_REPETITION": "repetition"}
+
+
+def _game_record(body, auto_result):
     b = make_board(body["start_fen"])
     game = chess.pgn.Game()
     game.setup(b)
@@ -185,9 +189,15 @@ def save_game(body: dict = Body(...)):
         b.push(mv)
     my_color = body.get("my_color") or None
     source = body.get("source", "assisted")
-    choice = body.get("result", "auto")
+    outcome = b.outcome(claim_draw=True)
+    choice = "auto" if auto_result else body.get("result", "auto")
     if choice == "auto":
-        result = b.result() if b.is_game_over() else bad("Game isn't over: pick a result")
+        if outcome:
+            result = outcome.result()
+        elif auto_result:
+            result = "*"  # still in progress (or left unfinished)
+        else:
+            bad("Game isn't over: pick a result")
     elif choice in ("win", "loss"):
         if not my_color:
             bad("Pick your color to record a win/loss")
@@ -196,21 +206,34 @@ def save_game(body: dict = Body(...)):
         result = RESULT_FROM_CHOICE[choice]
     else:
         bad("Unknown result")
+    ended = ENDED.get(outcome.termination.name, "over") if outcome else ("in progress" if result == "*" else "result entered")
     opp = (body.get("opponent") or "").strip()
-    me = "Me"
+    site = (body.get("site") or "").strip() or None
     now = datetime.now()
     game.headers.update({
-        "Event": "Chess Lab", "Site": "Chess Lab", "Date": now.strftime("%Y.%m.%d"),
-        "White": me if my_color == "white" else (opp or "?"),
-        "Black": me if my_color == "black" else (opp or "?"),
-        "Result": result,
+        "Event": "Chess Lab", "Site": site or "Chess Lab", "Date": now.strftime("%Y.%m.%d"),
+        "White": "Me" if my_color == "white" else (opp or "?"),
+        "Black": "Me" if my_color == "black" else (opp or "?"),
+        "Result": result, "Termination": ended,
     })
     cfg = load_config() if source == "assisted" else None
-    gid = db.add_game(
-        source=source, opponent=opp, my_color=my_color, result=result, start_fen=body["start_fen"],
-        pgn=str(game), plies=len(body["ucis"]), notes=(body.get("notes") or "").strip(),
-        engine_label=config_label(cfg) if cfg else None, engine_config=cfg)
-    return {"id": gid, "result": result}
+    return dict(source=source, opponent=opp, my_color=my_color, result=result, start_fen=body["start_fen"],
+                pgn=str(game), plies=len(body["ucis"]), notes=(body.get("notes") or "").strip(), site=site, ended=ended,
+                engine_label=config_label(cfg) if cfg else None, engine_config=cfg)
+
+
+@app.post("/api/games")
+def save_game(body: dict = Body(...)):
+    """Manual save (you pick the result). With an id it finalises the auto-saved record instead of adding a copy."""
+    g = _game_record(body, auto_result=False)
+    return {"id": db.upsert_game(body.get("id"), **g), "result": g["result"]}
+
+
+@app.post("/api/games/live")
+def autosave_game(body: dict = Body(...)):
+    """Auto-save: called as moves come in; keeps one record per game up to date."""
+    g = _game_record(body, auto_result=True)
+    return {"id": db.upsert_game(body.get("id"), **g), "result": g["result"], "ended": g["ended"]}
 
 
 @app.get("/api/games")
@@ -272,7 +295,7 @@ def opponents():
     return db.opponents()
 
 
-_sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0, "source": None, "site": None}
+_sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0, "source": None, "site": None, "opponent": ""}
 _sources = {}  # one entry per game tab: {placement, flipped, site, at, active_at}
 _sync_cv = threading.Condition()
 _PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
@@ -290,6 +313,7 @@ def _pick_source():
     if key != _sync["source"] or s["placement"] != _sync["placement"] or s["flipped"] != _sync["flipped"]:
         _sync.update(seq=_sync["seq"] + 1, placement=s["placement"], flipped=s["flipped"], source=key, site=s["site"])
         _sync_cv.notify_all()
+    _sync["opponent"] = s.get("opponent") or ""
 
 
 @app.post("/api/sync")
@@ -302,7 +326,8 @@ def sync_post(body: dict = Body(...)):
     with _sync_cv:
         s = _sources.setdefault(key, {"placement": None, "flipped": False, "active_at": 0.0})
         changed = pl != s["placement"] or fl != s["flipped"]
-        s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now)
+        s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now,
+                 opponent=str(body.get("opponent") or s.get("opponent") or "")[:60])
         if changed or body.get("focused"):
             s["active_at"] = now
         _sync["at"] = now

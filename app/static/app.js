@@ -25,6 +25,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 /* ---------- game state ---------- */
 const S = {
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
+  gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
 const fenAt = (i) => (i === 0 ? S.startFen : S.plies[i - 1].fen);
 const curFen = () => fenAt(S.cursor);
@@ -198,7 +199,8 @@ function renderRecHead() {
 }
 function renderMoves() {
   const el = $("#movelist"), n = S.plies.length;
-  $("#moves-count").textContent = n ? `· ${Math.ceil(n / 2)} moves` : "";
+  const mv = Math.ceil(n / 2);
+  $("#moves-count").textContent = n ? `· ${mv} move${mv === 1 ? "" : "s"}` : "";
   $("#moves-note").textContent = n && S.cursor < n ? `Viewing move ${Math.ceil(S.cursor / 2) || 0} of ${Math.ceil(n / 2)}. Press End (or ⏭) to return to the latest position.` : "";
   if (!n) {
     el.className = "movelist empty"; el.innerHTML = "No moves yet. They appear here as the game is played.";
@@ -217,7 +219,7 @@ function renderMoves() {
   });
   el.innerHTML = h;
   const cur = el.querySelector(".cur"); if (cur) cur.scrollIntoView({ block: "nearest" });
-  persistDraft();
+  persistDraft(); scheduleAutosave();
 }
 $("#movelist").addEventListener("click", (e) => { if (e.target.dataset.i) go(+e.target.dataset.i); });
 
@@ -249,6 +251,8 @@ $("#btn-undo").onclick = () => {
 };
 $("#btn-reset").onclick = () => newGame(START);
 function newGame(fen, plies = [], viewing = null) {
+  flushAutosave();
+  S.gameId = null; S.gameFinal = false; gameNo++;
   S.startFen = fen; S.plies = plies; S.cursor = plies.length; S.viewing = viewing; S.analysis = null;
   renderBanner(); refresh();
 }
@@ -375,7 +379,7 @@ $("#btn-import").onclick = async () => {
 let wasOver = false;
 function updateSaveForm() {
   const sc = $("#save-card"), n = S.plies.length;
-  $("#save-sum").textContent = n ? `· ${Math.ceil(n / 2)} moves` + (S.st.over ? ` · ${S.st.result}` : "") : "· nothing to save yet";
+  $("#save-sum").textContent = n ? `· ${Math.ceil(n / 2)} moves` + (S.st.over ? ` · ${S.st.result}` : "") + (S.gameId ? " · auto-saved ✓" : "") : "· nothing to save yet";
   if (S.st.over && !wasOver && !S.viewing) sc.open = true;
   if (!n) sc.open = false;
   wasOver = S.st.over;
@@ -390,12 +394,14 @@ $("#btn-save").onclick = async () => {
   const body = {
     start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), opponent: $("#f-opp").value, my_color: $("#f-color").value,
     source: $("#f-source").value, result: $("#f-result").value, notes: $("#f-notes").value,
+    id: S.gameId, site: S.live.site,
   };
   try {
     const r = await api("/api/games", body);
+    S.gameId = r.id; S.gameFinal = true; clearTimeout(asTimer); // your saved result stands; auto-save leaves it alone
     store.set("cl_form", { opponent: body.opponent, source: body.source });
     $("#f-notes").value = ""; clearDraft();
-    toast(`Saved (${r.result}). Press Reset for a new game.`);
+    toast(`Saved (${r.result}). It's in History.`);
     loadOpponents();
   } catch (err) { toast(err.message, true); }
 };
@@ -415,7 +421,32 @@ function renderBanner() {
 /* ---------- unsaved-game draft (survives closing the window) ---------- */
 function persistDraft() {
   if (S.viewing) return;
-  store.set("cl_draft", S.plies.length ? { startFen: S.startFen, ucis: S.plies.map((p) => p.uci), orient: S.orient, cursor: S.cursor } : null);
+  store.set("cl_draft", S.plies.length ? { startFen: S.startFen, ucis: S.plies.map((p) => p.uci), orient: S.orient, cursor: S.cursor, gameId: S.gameId, gameFinal: S.gameFinal, live: S.live } : null);
+}
+
+/* ---------- auto-save: every game (4+ plies) is kept in History and updated as moves come in ---------- */
+let asTimer = null, asPending = null, asBusy = false, gameNo = 0;
+function autosaveSnapshot() {
+  if (S.viewing || S.gameFinal || E.on || S.plies.length < 4) return null;
+  return { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), my_color: S.orient, source: "assisted",
+    opponent: S.live.opponent || $("#f-opp").value, site: S.live.site, game: gameNo };
+}
+function scheduleAutosave() {
+  const snap = autosaveSnapshot();
+  if (!snap) return;
+  asPending = snap; clearTimeout(asTimer); asTimer = setTimeout(runAutosave, 700);
+}
+function flushAutosave() { clearTimeout(asTimer); if (asPending) runAutosave(); }
+async function runAutosave() {
+  if (asBusy) { asTimer = setTimeout(runAutosave, 200); return; } // one write at a time, so a game never gets two records
+  const snap = asPending; asPending = null;
+  if (!snap) return;
+  asBusy = true;
+  try {
+    const r = await api("/api/games/live", snap);
+    if (snap.game === gameNo && !S.gameFinal) { S.gameId = r.id; persistDraft(); if (S.st) updateSaveForm(); }
+    if (asPending && asPending.game === snap.game) asPending.id = r.id;
+  } catch {} finally { asBusy = false; }
 }
 function clearDraft() { store.set("cl_draft", null); }
 
@@ -440,7 +471,7 @@ async function loadHistory(reset) {
   const d = await api(`/api/games?q=${q}&source=${s}&limit=${PAGE}&offset=${hOffset}`);
   $("#h-table tbody").insertAdjacentHTML("beforeend", d.games.map((g) =>
     `<tr data-id="${g.id}" style="cursor:pointer"><td>${fmtDate(g.created_at)}</td><td>${esc(g.opponent || "—")}</td><td>${resLabel(g.outcome, g.result)}</td>
-     <td>${g.my_color || "—"}</td><td>${Math.ceil(g.plies / 2)}</td><td>${g.source}</td><td class="muted">${esc(g.engine_label || "—")}</td>
+     <td>${g.my_color || "—"}</td><td>${Math.ceil(g.plies / 2)}</td><td>${g.source}${g.site ? " · " + esc(g.site) : ""}${g.ended ? `<div class="muted tiny">${esc(g.ended)}</div>` : ""}</td><td class="muted">${esc(g.engine_label || "—")}</td>
      <td><a href="/api/games/${g.id}/pgn" download title="Export PGN">PGN</a> · <a href="#" data-del="${g.id}">delete</a></td></tr>`).join(""));
   hOffset += d.games.length;
   $("#h-empty").classList.toggle("hidden", d.total > 0);
@@ -616,7 +647,8 @@ sform.addEventListener("submit", async (e) => {
 });
 
 /* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
-let syncSeq = -1, syncBusy = false, syncLast = null;
+let syncSeq = -1, syncBusy = false, syncLast = null, farSince = null;
+const START_PLACEMENT = START.split(" ")[0];
 function renderSyncChip(d) {
   const on = $("#sync-on").checked, site = d.site === "lichess" ? "Lichess" : d.site === "chess.com" ? "Chess.com" : "game";
   $("#sync-chip").textContent = d.connected ? `● Synced with ${site} tab` + (d.tabs > 1 ? ` (${d.tabs} open, follows the one you use)` : "")
@@ -633,7 +665,13 @@ async function syncTick(d) {
     if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
     const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
     const r = await api("/api/sync/apply", { fen: end, placement: d.placement, flipped: d.flipped });
-    syncSeq = d.seq;
+    if (r.mode === "reset" && d.placement !== START_PLACEMENT && S.plies.length) {
+      // a board we can't reach from this game: a real jump, or a half-drawn frame. Only rebuild if it holds for 1.2 s.
+      if (!farSince || farSince.p !== d.placement) { farSince = { p: d.placement, t: Date.now() }; setTimeout(() => syncTick(), 1300); return; }
+      if (Date.now() - farSince.t < 1200) return;
+    }
+    farSince = null; syncSeq = d.seq;
+    if (d.site) S.live = { site: d.site, opponent: d.opponent || S.live.opponent };
     if (r.mode === "append") {
       S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh(true);
     } else if (r.mode === "reset") {
@@ -672,6 +710,7 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
       const t = await api("/api/timeline", { start_fen: d.startFen, ucis: d.ucis });
       S.orient = d.orient || "white"; $("#f-color").value = S.orient;
       S.startFen = t.start_fen; S.plies = t.plies; S.cursor = Math.min(d.cursor ?? t.plies.length, t.plies.length);
+      S.gameId = d.gameId || null; S.gameFinal = !!d.gameFinal; if (d.live) S.live = d.live;
       toast("Restored your unsaved game");
     } catch { clearDraft(); }
   }

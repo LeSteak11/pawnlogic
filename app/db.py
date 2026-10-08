@@ -62,8 +62,26 @@ def conn() -> sqlite3.Connection:
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
+        have = {r[1] for r in c.execute("PRAGMA table_info(games)")}
+        for col in ("site", "ended", "updated_at"):  # added later: where it was played, how it ended, last auto-save
+            if col not in have:
+                c.execute(f"ALTER TABLE games ADD COLUMN {col} TEXT")
         _local.c = c
     return c
+
+
+def upsert_game(gid, **g) -> str:
+    """Update a game in place (auto-save as moves come in); insert it if the id is unknown."""
+    if gid and conn().execute("SELECT 1 FROM games WHERE id = ?", (gid,)).fetchone():
+        conn().execute(
+            """UPDATE games SET opponent=?, my_color=?, result=?, start_fen=?, pgn=?, plies=?, engine_label=?,
+               engine_config=?, notes=?, site=?, ended=?, updated_at=? WHERE id=?""",
+            (g.get("opponent", ""), g.get("my_color"), g["result"], g["start_fen"], g["pgn"], g["plies"],
+             g.get("engine_label"), json.dumps(g["engine_config"]) if g.get("engine_config") else None,
+             g.get("notes", ""), g.get("site"), g.get("ended"), datetime.now(timezone.utc).isoformat(timespec="seconds"), gid))
+        conn().commit()
+        return gid
+    return add_game(**g)
 
 
 def add_game(**g) -> str:
@@ -76,11 +94,13 @@ def add_game(**g) -> str:
          json.dumps(g["engine_config"]) if g.get("engine_config") else None, g.get("experiment_id"),
          g.get("notes", "")),
     )
+    if g.get("site") or g.get("ended"):
+        conn().execute("UPDATE games SET site=?, ended=?, updated_at=created_at WHERE id=?", (g.get("site"), g.get("ended"), gid))
     conn().commit()
     return gid
 
 
-LIST_COLS = f"id, created_at, source, opponent, my_color, result, plies, engine_label, experiment_id, notes, json_extract(engine_config, '$.white') AS exp_white, ({OUTCOME}) AS outcome"
+LIST_COLS = f"id, created_at, source, site, ended, opponent, my_color, result, plies, engine_label, experiment_id, notes, json_extract(engine_config, '$.white') AS exp_white, ({OUTCOME}) AS outcome"
 
 
 def list_games(q="", source="", limit=50, offset=0, experiment=""):

@@ -16,14 +16,17 @@ function readChesscom() {
   if (!b) return null;
   const grid = Array.from({ length: 8 }, () => Array(8).fill(null));
   for (const p of b.querySelectorAll(".piece")) {
+    if (p.classList.contains("dragging")) return null; // mid-drag: wait for the drop
     const pc = p.className.match(/\b([wb])([pnbrqk])\b/), sq = p.className.match(/square-(\d)(\d)/);
     if (!pc || !sq) continue;
     const f = +sq[1] - 1, r = +sq[2] - 1;
     if (f < 0 || f > 7 || r < 0 || r > 7) continue;
+    if (grid[7 - r][f]) return null; // two pieces on one square = capture still animating: skip this frame
     grid[7 - r][f] = pc[1] === "w" ? pc[2].toUpperCase() : pc[2];
   }
   const placement = toPlacement(grid);
-  return placement && { placement, flipped: b.classList.contains("flipped") };
+  const opp = document.querySelector('.player-top [data-test-element="user-tagline-username"], #board-layout-player-top .user-username-component, .player-top .user-username-component');
+  return placement && { placement, flipped: b.classList.contains("flipped"), opponent: opp ? opp.textContent.trim().slice(0, 60) : "" };
 }
 
 // Lichess: only games against Stockfish ("Stockfish level N"); pieces are positioned by pixel offsets.
@@ -50,7 +53,7 @@ function readLichess() {
     grid[rankFromTop][file] = white ? LETTER[kind].toUpperCase() : LETTER[kind];
   }
   const placement = toPlacement(grid);
-  return placement && { placement, flipped: black };
+  return placement && { placement, flipped: black, opponent: top.textContent.trim().replace(/\s+/g, " ").slice(0, 60) };
 }
 
 const readBoard = IS_LICHESS ? readLichess : readChesscom;
