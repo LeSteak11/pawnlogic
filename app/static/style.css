@@ -231,3 +231,12 @@ body.blitz .cbar{margin:5px 0 0}
 .endrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:14px}
 .endrow button{padding:4px 10px;font-size:13px}
 #banner [data-res]{padding:4px 10px}
+/* blitz: whole background warms to deep gold (eased in), flash of solid gold on switch-on */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:0;transition:opacity .9s ease;
+  background:radial-gradient(1400px 900px at 50% -15%,#4a3a14 0%,#2b2210 42%,#191509 100%)}
+body.blitz::before{opacity:1}
+body.blitz{--panel:#1e1b12;--panel2:#28231a;--line:#3d3424}
+body.blitz .card,body.blitz .tile{transition:background-color .9s,border-color .9s}
+#gold-flash{position:fixed;inset:0;pointer-events:none;z-index:90;background:#d6b45e;opacity:0}
+#gold-flash.go{animation:goldFlash 1s ease-out}
+@keyframes goldFlash{0%{opacity:0}14%{opacity:.62}100%{opacity:0}}

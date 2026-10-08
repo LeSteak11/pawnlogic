@@ -867,6 +867,10 @@ async function syncTick(d) {
   try {
     d = d || await api("/api/sync");
     syncLast = d; renderSyncChip(d); updateClock(d);
+    if ($("#sync-on").checked && d.connected && d.placement && !S.viewing && S.cursor === S.plies.length) {
+      const col = d.flipped ? "black" : "white"; // board drawn from Black's side = you're Black
+      if (col !== S.orient) { S.orient = col; $("#f-color").value = col; S.pick = -1; drawBoard(); renderMoves(); renderRecHead(); if (S.st) analyse(true); }
+    }
     if (!$("#sync-on").checked || !d.connected || d.seq === syncSeq || !d.placement) return;
     if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
     const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
@@ -982,9 +986,19 @@ function renderClockWarn() {
   el.classList.toggle("hidden", !low);
   if (low) el.textContent = `⏱ ${Math.ceil(CLK.my)}s left: play fast`;
 }
+function blitzFx() { // switch-on moment: gold flash over the whole screen + a short gold confetti burst
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const f = $("#gold-flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
+  if (window.confetti) {
+    const o = { particleCount: 70, spread: 62, startVelocity: 48, ticks: 170, scalar: 0.95, colors: ["#f0dca0", "#e2c47a", "#c7a656", "#a8893f"], disableForReducedMotion: true };
+    confetti({ ...o, angle: 60, origin: { x: 0, y: 0.95 } });
+    confetti({ ...o, angle: 120, origin: { x: 1, y: 0.95 } });
+  }
+}
 function setBlitz(on) {
   PREF.blitz = on; store.set("cl_blitz", on);
   document.body.classList.toggle("blitz", on);
+  if (on) blitzFx();
   $("#blitz-btn").classList.toggle("on", on); $("#blitz-btn").setAttribute("aria-pressed", on);
   if (S.st) { S.pick = -1; S.analysis = null; analyse(true); }
 }
