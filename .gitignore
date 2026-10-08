@@ -8,3 +8,7 @@ data/*.log
 data/exports/*
 !data/exports/.gitkeep
 config.json
+build/
+dist/
+.tools/
+release.json

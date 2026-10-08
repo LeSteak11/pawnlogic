@@ -44,8 +44,8 @@ const sqName = (f, r) => "abcdefgh"[f] + (r + 1);
 /* ---------- board ---------- */
 let selected = null;
 const PIECE_FILE = { k: "K", q: "Q", r: "R", b: "B", n: "N", p: "P" };
-// "me" is the side drawn as cream pieces; the other side is always the dark steel set.
-function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null, me = "white" } = {}) {
+// Piece appearance follows its actual color; orientation only changes its position.
+function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null } = {}) {
   const grid = parseFen(fen);
   let svg = `<svg viewBox="-4 0 84 84" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#4fae78"/></marker></defs>`;
   const pos = (f, r) => (flip ? [(7 - f) * 10, r * 10] : [f * 10, (7 - r) * 10]);
@@ -57,8 +57,8 @@ function boardSvg(fen, { flip = false, last = null, selected = null, legal = [],
     if (selected === name) svg += `<rect x="${x + .4}" y="${y + .4}" width="9.2" height="9.2" rx="1" class="sel" pointer-events="none"/>`;
     const p = grid[7 - r][f];
     if (p) {
-      const white = p === p.toUpperCase(), mine = (white ? "white" : "black") === me;
-      svg += `<image href="/static/pieces/${mine ? "w" : "b"}${PIECE_FILE[p.toLowerCase()]}.svg" x="${x + .35}" y="${y + .35}" width="9.3" height="9.3" class="${mine ? "pm" : "po"}" pointer-events="none"/>`;
+      const white = p === p.toUpperCase();
+      svg += `<image href="/static/pieces/${white ? "w" : "b"}${PIECE_FILE[p.toLowerCase()]}.svg" x="${x + .35}" y="${y + .35}" width="9.3" height="9.3" class="${white ? "piece-white" : "piece-black"}" pointer-events="none"/>`;
     }
   }
   for (let i = 0; i < 8; i++) {
@@ -77,12 +77,12 @@ function boardSvg(fen, { flip = false, last = null, selected = null, legal = [],
 }
 function drawBoard() {
   if (E.on) {
-    $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", me: S.orient, selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
+    $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
     return;
   }
   const best = pickedCand();
   $("#board").innerHTML = boardSvg(curFen(), {
-    flip: S.orient === "black", me: S.orient, last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
+    flip: S.orient === "black", last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
     legal: S.st ? S.st.legal : [], arrow: best ? best.uci : null,
   });
 }
@@ -108,7 +108,7 @@ function buildPalette() {
   const btn = (tool, inner, cls, title) => `<button data-tool="${tool}" class="${cls || ""}" title="${title || tool}">${inner}</button>`;
   const row = (own) => Object.keys(OUTLINE).map((k) => {
     const white = (S.orient === "white") === own;
-    return btn(white ? k : k.toLowerCase(), `<img src="/static/pieces/${own ? "w" : "b"}${k}.svg" class="${own ? "pm" : "po"}" alt="${k}">`, "pc", `${own ? "Your" : "Opponent's"} ${PIECE_NAMES[k.toLowerCase()]}`);
+    return btn(white ? k : k.toLowerCase(), `<img src="/static/pieces/${white ? "w" : "b"}${k}.svg" class="${white ? "piece-white" : "piece-black"}" alt="${white ? "White" : "Black"} ${PIECE_NAMES[k.toLowerCase()]}">`, "pc", `${own ? "Your" : "Opponent's"} ${PIECE_NAMES[k.toLowerCase()]}`);
   }).join("");
   $("#ed-palette").innerHTML = btn("move", "✥ Move", "tl") + btn("x", "✖ Erase", "tl") + row(true) + row(false);
   markTool();
@@ -865,12 +865,14 @@ sform.addEventListener("submit", async (e) => {
 
 /* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
 let syncSeq = -1, syncBusy = false, syncLast = null, farSince = null;
+let reconnecting = false, hadSyncConnection = false, reconnectAttempt = 0;
 const START_PLACEMENT = START.split(" ")[0];
 function renderSyncChip(d) {
   const on = $("#sync-on").checked, site = d.site === "lichess" ? "Lichess" : d.site === "chess.com" ? "Chess.com" : "game";
   $("#sync-chip").textContent = d.connected ? `● Synced with ${site} tab` + (d.tabs > 1 ? ` (${d.tabs} open, follows the one you use)` : "")
-    : "○ Waiting for a Chess.com / Lichess computer game";
+    : reconnecting ? "↻ Reconnecting to the open game…" : "○ Waiting for a Chess.com / Lichess computer game";
   $("#sync-chip").className = "chip " + (d.connected ? "mine" : "opp") + (on ? "" : " hidden");
+  if (d.connected) reconnecting = false;
 }
 async function syncTick(d) {
   if (syncBusy || E.on) return;
@@ -878,6 +880,13 @@ async function syncTick(d) {
   try {
     d = d || await api("/api/sync");
     syncLast = d; renderSyncChip(d); updateClock(d);
+    if (d.connected) hadSyncConnection = true;
+    else if ($("#sync-on").checked && hadSyncConnection && !reconnecting) {
+      // Chess.com may replace its game page between bot games. Recover once
+      // automatically instead of making the player resign or refresh tabs.
+      hadSyncConnection = false;
+      requestSyncReconnect(false);
+    }
     if ($("#sync-on").checked && d.connected && d.placement && !S.viewing && S.cursor === S.plies.length) {
       const col = d.flipped ? "black" : "white"; // board drawn from Black's side = you're Black
       if (col !== S.orient) { S.orient = col; $("#f-color").value = col; S.pick = -1; drawBoard(); renderMoves(); renderRecHead(); if (S.st) analyse(true); }
@@ -904,6 +913,29 @@ async function syncTick(d) {
 }
 $("#sync-on").checked = store.get("cl_sync", true);
 $("#sync-on").onchange = (e) => { store.set("cl_sync", e.target.checked); syncSeq = -1; syncTick(); };
+async function requestSyncReconnect(manual) {
+  if (reconnecting) return;
+  const attempt = ++reconnectAttempt;
+  reconnecting = true; syncSeq = -1; farSince = null;
+  $("#sync-on").checked = true; store.set("cl_sync", true);
+  renderSyncChip({ connected: false, site: "", tabs: 0 });
+  try {
+    await api("/api/sync/reconnect", {});
+    if (manual) toast("Reconnect requested — keep the computer game tab open");
+    // A healthy reader reports within a couple seconds. If it was detached, the
+    // extension's service-worker fallback may take up to 30 seconds to re-inject it.
+    setTimeout(() => syncTick(), 300);
+    setTimeout(() => {
+      if (attempt !== reconnectAttempt || !reconnecting || (syncLast && syncLast.connected)) return;
+      reconnecting = false;
+      renderSyncChip(syncLast || { connected: false, site: "", tabs: 0 });
+      if (manual) toast("Still waiting — reload the extension once, then click Reconnect again", true);
+    }, 32000);
+  } catch (err) {
+    reconnecting = false; toast(err.message, true); syncTick();
+  }
+}
+$("#sync-reconnect").onclick = () => requestSyncReconnect(true);
 // Long-poll: the server answers the moment the game tab's board changes, so a move shows up (and analysis starts) immediately.
 (async function syncLoop() {
   let seen = -1;

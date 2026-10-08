@@ -60,15 +60,14 @@ def timeline(start_fen: str, ucis: list) -> list:
 
 
 def code_version() -> str:
-    h = hashlib.md5()
-    for f in sorted(Path(__file__).parent.glob("*.py")):
-        h.update(f.read_bytes())
-    return h.hexdigest()[:12]
+    from .release import release_info
+    return release_info()["version"]
 
 
 @app.get("/api/version")
 def version():
-    return {"version": code_version()}
+    from .release import release_info
+    return release_info()
 
 
 @app.post("/api/shutdown")
@@ -327,6 +326,7 @@ def opponents():
 _sync = {"seq": 0, "placement": None, "flipped": False, "at": 0.0, "source": None, "site": None, "opponent": ""}
 _sources = {}  # one entry per game tab: {placement, flipped, site, at, active_at}
 _sync_cv = threading.Condition()
+_sync_reconnect = 0  # bumped by the UI; the extension notices and re-injects its page reader
 _PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
 
 
@@ -367,7 +367,9 @@ def sync_post(body: dict = Body(...)):
             s["active_at"] = now
         _sync["at"] = now
         _pick_source()
-    return {"ok": True}
+    # Returning the reconnect generation makes recovery nearly instant while any
+    # content script is still alive. The extension alarm is the fallback when it is not.
+    return {"ok": True, "recal": _sync_reconnect}
 
 
 @app.get("/api/sync")
@@ -377,6 +379,25 @@ def sync_get(after: int = -1):
         if after >= 0:
             _sync_cv.wait_for(lambda: _sync["seq"] != after, timeout=15)
         return {**_sync, "connected": time.time() - _sync["at"] < 4, "tabs": len(_sources)}
+
+
+@app.get("/api/sync/recal")
+def sync_recal():
+    """Small endpoint polled by the extension service worker when no game tab is reporting."""
+    return {"n": _sync_reconnect}
+
+
+@app.post("/api/sync/reconnect")
+def sync_reconnect():
+    """Forget stale tab state and ask the extension to attach to open game tabs again."""
+    global _sync_reconnect
+    with _sync_cv:
+        _sync_reconnect += 1
+        _sources.clear()
+        _sync.update(seq=_sync["seq"] + 1, placement=None, flipped=False, at=0.0,
+                     source=None, site=None, opponent="", my_clock=None, opp_clock=None)
+        _sync_cv.notify_all()
+        return {"ok": True, "recal": _sync_reconnect}
 
 
 @app.post("/api/sync/apply")

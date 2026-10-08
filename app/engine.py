@@ -7,8 +7,7 @@ from pathlib import Path
 import chess
 import chess.engine
 
-ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = ROOT / "config.json"
+from .paths import CONFIG_PATH, RESOURCE_ROOT
 
 DEFAULT_CONFIG = {
     "engine": "stockfish",
@@ -68,14 +67,16 @@ def uci_options(cfg: dict) -> dict:
 
 def engine_path(cfg: dict) -> Path:
     p = Path(cfg["path"])
-    return p if p.is_absolute() else ROOT / p
+    return p if p.is_absolute() else RESOURCE_ROOT / p
 
 
 def open_uci(cfg: dict) -> "chess.engine.SimpleEngine":
     path = engine_path(cfg)
     if not path.exists():
         raise RuntimeError(f"Stockfish not found at {path}. Put stockfish.exe in the engine/ folder.")
-    proc = chess.engine.SimpleEngine.popen_uci(str(path))
+    import os
+    import subprocess
+    proc = chess.engine.SimpleEngine.popen_uci(str(path), creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     proc.configure({k: v for k, v in uci_options(cfg).items() if k in proc.options})
     return proc
 

@@ -3,7 +3,9 @@
 Local chess laboratory: Stockfish move recommendations, game tracking, history/replay and stats. No cloud, no API keys.
 
 ## Run
-Double-click `ChessLab.bat` (or the desktop shortcut). A compact Edge app window opens; it closes the server itself a few minutes after the window is closed.
+Packaged Windows releases use `ChessLab-Setup-<version>.exe`. It creates the desktop shortcut, bundles Python and Stockfish, and upgrades in place while preserving games. Build and release instructions: [docs/releases.md](docs/releases.md).
+
+For source development, double-click `ChessLab.bat`. A compact Brave app window opens (Edge fallback); the server closes itself a few minutes after the window is closed.
 
 First-time setup: Python 3.11+, then `engine/stockfish.exe` (Stockfish 19 x86-64 from https://stockfishchess.org/download/). The batch file creates `.venv` and installs `requirements.txt` automatically.
 
@@ -17,9 +19,9 @@ First-time setup: Python 3.11+, then `engine/stockfish.exe` (Stockfish 19 x86-64
 No scraping, screen-reading or automated input of Chess.com. Don't use engine help against human opponents.
 
 ## Data
-- `data/games.db` (SQLite) is the source of truth. PGN is generated on export.
-- Back up: History tab > *Backup database*, or just copy `data/games.db`. Export all games: *Export all PGN*.
-- `config.json` stores engine settings (also editable under ⚙ Settings).
+- `%LOCALAPPDATA%\ChessLab\data\games.db` (SQLite) is the source of truth. Existing source-folder data is migrated without deleting the originals. PGN is generated on export.
+- Back up: History tab > *Backup database*. Export all games: *Export all PGN*.
+- `%LOCALAPPDATA%\ChessLab\config.json` stores engine settings (also editable under ⚙ Settings).
 - Source types: **assisted** (engine used), **independent** (no engine), **experiment** (engine-vs-engine, Phase 2). Stats are never mixed silently: the Dashboard has a filter. Win % = wins / scored games; unfinished games and experiments aren't scored.
 
 ## Auto-sync from Chess.com computer games (optional)
@@ -28,6 +30,7 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 2. Open Chess Lab, leave *Auto-sync from Chess.com* ticked, then start a computer game on Chess.com.
 3. Chess Lab shows "connected", follows both sides' moves, and recommends your move. Don't type moves while sync is on.
 Also works on Lichess games against Stockfish ("Stockfish level N") on lichess.org; human games are never read. After updating the extension, click its reload button in the extensions page and refresh the tab.
+When a connected game feed drops, Chess Lab now makes one automatic reconnect attempt. If a new game still stays on "Waiting", click **Reconnect** beside Auto-sync. It forgets the old tab and asks the extension for a fresh board snapshot; keep the computer-game tab open (the fallback can take up to 30 seconds).
 Chess.com can change its page layout, which would break the reader; the manual move box always works as a fallback.
 
 ## Experiments (engine vs engine)

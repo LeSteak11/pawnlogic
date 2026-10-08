@@ -6,8 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = ROOT / "data" / "games.db"
+from .paths import DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (

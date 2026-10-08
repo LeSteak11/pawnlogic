@@ -1,4 +1,8 @@
 // Read-only: reports piece placement and board orientation for computer games. It never clicks, types or moves anything.
+// Wrapped so Chess Lab's "Reconnect" can inject it again into an open tab without doubling up.
+(() => {
+const alive = () => { try { return !!chrome.runtime.id; } catch { return false; } };
+if (window.__chessLabSync && window.__chessLabSync.alive()) { window.__chessLabSync.resend(); return; }
 const IS_LICHESS = location.hostname === "lichess.org";
 
 function toPlacement(grid) { // grid[0] = rank 8
@@ -12,6 +16,9 @@ function toPlacement(grid) { // grid[0] = rank 8
 }
 
 function readChesscom() {
+  // A content script survives SPA navigation; stop reporting if the user leaves
+  // the computer-game route for a human game in the same tab.
+  if (!/^\/(?:play\/computer(?:\/|$)|game\/computer\/)/.test(location.pathname)) return null;
   const b = document.querySelector("wc-chess-board, chess-board");
   if (!b) return null;
   const grid = Array.from({ length: 8 }, () => Array(8).fill(null));
@@ -63,9 +70,13 @@ function clockSecs(el) {
 }
 function readClocks() {
   const q = (s) => document.querySelector(s);
+  // whose clock is running = whose turn it is ("me" = bottom side)
+  const turn = IS_LICHESS
+    ? (q(".rclock-bottom.running") ? "me" : q(".rclock-top.running") ? "opp" : null)
+    : (q(".clock-bottom.clock-player-turn") ? "me" : q(".clock-top.clock-player-turn") ? "opp" : null);
   return IS_LICHESS
-    ? { my_clock: clockSecs(q(".rclock-bottom .time")), opp_clock: clockSecs(q(".rclock-top .time")) }
-    : { my_clock: clockSecs(q(".clock-bottom .clock-time-monospace, .clock-bottom")), opp_clock: clockSecs(q(".clock-top .clock-time-monospace, .clock-top")) };
+    ? { my_clock: clockSecs(q(".rclock-bottom .time")), opp_clock: clockSecs(q(".rclock-top .time")), turn }
+    : { my_clock: clockSecs(q(".clock-bottom .clock-time-monospace, .clock-bottom")), opp_clock: clockSecs(q(".clock-top .clock-time-monospace, .clock-top")), turn };
 }
 
 const readBoard = IS_LICHESS ? readLichess : readChesscom;
@@ -77,13 +88,19 @@ function push(force, focused = false) {
   const key = s.placement + s.flipped, clk = readClocks(), ck = clk.my_clock + "|" + clk.opp_clock;
   if (key === last && !force && !(ck !== lastClock && Date.now() - lastSent > 900)) return; // clocks: about once a second
   last = key; lastClock = ck; lastSent = Date.now();
-  chrome.runtime.sendMessage({ ...s, ...clk, site: SITE, focused });
+  if (!alive()) return stop(); // extension was reloaded: this copy retires (a fresh one gets injected)
+  try { chrome.runtime.sendMessage({ ...s, ...clk, site: SITE, focused }); } catch { stop(); }
 }
 // Read soon after the board changes, but never let a busy page (clocks, animations) starve the read.
-new MutationObserver(() => { if (!timer) timer = setTimeout(() => { timer = null; push(false); }, 60); })
-  .observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
-setInterval(() => push(Date.now() - lastSent > 2000), 1000); // heartbeat so Chess Lab can show "connected"
+const mo = new MutationObserver(() => { if (!timer) timer = setTimeout(() => { timer = null; push(false); }, 60); });
+mo.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
+const beat = setInterval(() => push(Date.now() - lastSent > 2000), 1000); // heartbeat so Chess Lab can show "connected"
+function stop() { mo.disconnect(); clearInterval(beat); window.removeEventListener("focus", claim); document.removeEventListener("visibilitychange", claim); }
 // Switching to this tab makes it the game Chess Lab follows.
 const claim = () => { if (document.visibilityState === "visible") push(true, true); };
 window.addEventListener("focus", claim);
 document.addEventListener("visibilitychange", claim);
+chrome.runtime.onMessage.addListener((m) => { if (m && m.cmd === "resend") push(true, true); }); // Chess Lab asked for a fresh snapshot
+window.__chessLabSync = { alive, resend: () => push(true, true) };
+push(true);
+})();

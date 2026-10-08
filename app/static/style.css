@@ -88,6 +88,7 @@ tr.sel{background:var(--panel2)}
 .chip.mine{border-color:var(--good);color:var(--good)}.chip.opp{color:var(--muted)}.chip.over{border-color:var(--accent);color:var(--accent)}
 .optrow{display:flex;gap:6px 18px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:13px}
 .optrow label{display:inline-flex;gap:6px;align-items:center}.optrow input{width:auto}
+.optrow .sync-reconnect{padding:4px 9px;font-size:12px}
 .tiny{font-size:12px}
 /* eval bar */
 #evalbar{width:34px;display:flex;flex-direction:column;align-items:center;gap:4px;border:0;background:none;border-radius:0;overflow:visible;justify-content:initial}
@@ -156,9 +157,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid #3f6b54}
 #board .sel{fill:rgba(214,196,120,.18);stroke:rgba(230,214,150,.75);stroke-width:.45}
 #board .dot-legal{fill:rgba(20,28,24,.38)}
 #board .coord{fill:#9aa3a8;font-size:2.7px;font-family:Inter,"Segoe UI",sans-serif;font-weight:600}
-/* pieces: me = soft cream (white set dimmed), opponent = steel (black set lifted, thin light edge) */
-#board .pm,.palette img.pm{filter:brightness(.88) sepia(.22) drop-shadow(0 .25px .35px rgba(0,0,0,.45))}
-#board .po,.palette img.po{filter:invert(.16) sepia(.2) hue-rotate(170deg) drop-shadow(0 0 .22px rgba(205,215,220,.55))}
+/* Actual colors: White = soft cream; Black = dark steel with a thin light edge. */
+#board .piece-white,.palette img.piece-white{filter:brightness(.88) sepia(.22) drop-shadow(0 .25px .35px rgba(0,0,0,.45))}
+#board .piece-black,.palette img.piece-black{filter:invert(.16) sepia(.2) hue-rotate(170deg) drop-shadow(0 0 .22px rgba(205,215,220,.55))}
 .palette button.pc{padding:2px 4px;min-width:46px}.palette img{width:34px;height:34px;display:block}
 @media (max-width:1100px){main{padding:12px}.analyze-grid{gap:12px}.rec #best-move{font-size:36px}}
 /* win chance meter */
