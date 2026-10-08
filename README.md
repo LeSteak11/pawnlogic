@@ -52,4 +52,4 @@ Add another engine: subclass `Engine` in `app/engine.py` and register it in `ENG
 V1 feature-complete: analysis, save, history, dashboard, experiments.
 
 ## Credits
-Chess pieces: "cburnett" set by Colin M. L. Burnett, as distributed with Lichess (github.com/lichess-org/lila, public/piece/cburnett); see that repository for licence terms. Font: Inter (Google Fonts, loaded online; falls back to Segoe UI offline).
+Chess pieces: "merida" set (white and black) by Armando Hernandez Marroquin, GPLv2+, as distributed with Lichess (github.com/lichess-org/lila, public/piece/merida; licence listed in that repository's COPYING.md). Font: Inter (Google Fonts, loaded online; falls back to Segoe UI offline).

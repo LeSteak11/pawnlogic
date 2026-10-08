@@ -46,7 +46,7 @@ const PIECE_FILE = { k: "K", q: "Q", r: "R", b: "B", n: "N", p: "P" };
 // "me" is the side drawn as cream pieces; the other side is always the dark steel set.
 function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null, me = "white" } = {}) {
   const grid = parseFen(fen);
-  let svg = `<svg viewBox="-4 0 84 84" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#5fd18b"/></marker></defs>`;
+  let svg = `<svg viewBox="-4 0 84 84" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#4fae78"/></marker></defs>`;
   const pos = (f, r) => (flip ? [(7 - f) * 10, r * 10] : [f * 10, (7 - r) * 10]);
   svg += `<rect x="0" y="0" width="80" height="80" rx="2" class="bframe"/>`;
   for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
@@ -57,7 +57,7 @@ function boardSvg(fen, { flip = false, last = null, selected = null, legal = [],
     const p = grid[7 - r][f];
     if (p) {
       const white = p === p.toUpperCase(), mine = (white ? "white" : "black") === me;
-      svg += `<image href="/static/pieces/w${PIECE_FILE[p.toLowerCase()]}.svg" x="${x + .35}" y="${y + .35}" width="9.3" height="9.3" class="${mine ? "pm" : "po"}" pointer-events="none"/>`;
+      svg += `<image href="/static/pieces/${mine ? "w" : "b"}${PIECE_FILE[p.toLowerCase()]}.svg" x="${x + .35}" y="${y + .35}" width="9.3" height="9.3" class="${mine ? "pm" : "po"}" pointer-events="none"/>`;
     }
   }
   for (let i = 0; i < 8; i++) {
@@ -70,7 +70,7 @@ function boardSvg(fen, { flip = false, last = null, selected = null, legal = [],
   }
   if (arrow) {
     const [x1, y1] = pos("abcdefgh".indexOf(arrow[0]), +arrow[1] - 1), [x2, y2] = pos("abcdefgh".indexOf(arrow[2]), +arrow[3] - 1);
-    svg += `<line x1="${x1 + 5}" y1="${y1 + 5}" x2="${x2 + 5}" y2="${y2 + 5}" stroke="#5fd18b" stroke-opacity=".85" stroke-width="1.3" marker-end="url(#ah)" pointer-events="none"/>`;
+    svg += `<line x1="${x1 + 5}" y1="${y1 + 5}" x2="${x2 + 5}" y2="${y2 + 5}" stroke="#4fae78" stroke-opacity=".85" stroke-width="1.3" marker-end="url(#ah)" pointer-events="none"/>`;
   }
   return svg + "</svg>";
 }
@@ -107,7 +107,7 @@ function buildPalette() {
   const btn = (tool, inner, cls, title) => `<button data-tool="${tool}" class="${cls || ""}" title="${title || tool}">${inner}</button>`;
   const row = (own) => Object.keys(OUTLINE).map((k) => {
     const white = (S.orient === "white") === own;
-    return btn(white ? k : k.toLowerCase(), `<img src="/static/pieces/w${k}.svg" class="${own ? "pm" : "po"}" alt="${k}">`, "pc", `${own ? "Your" : "Opponent's"} ${PIECE_NAMES[k.toLowerCase()]}`);
+    return btn(white ? k : k.toLowerCase(), `<img src="/static/pieces/${own ? "w" : "b"}${k}.svg" class="${own ? "pm" : "po"}" alt="${k}">`, "pc", `${own ? "Your" : "Opponent's"} ${PIECE_NAMES[k.toLowerCase()]}`);
   }).join("");
   $("#ed-palette").innerHTML = btn("move", "✥ Move", "tl") + btn("x", "✖ Erase", "tl") + row(true) + row(false);
   markTool();
