@@ -134,8 +134,11 @@ def move(body: dict = Body(...)):
 @app.post("/api/analyse")
 def analyse(body: dict = Body(...)):
     b = make_board(body["fen"])
+    cfg = load_config()
+    if isinstance(body.get("multipv"), int) and 1 <= body["multipv"] <= 8:
+        cfg["multipv"] = body["multipv"]  # a play style asks for a few more options to choose from
     try:
-        return engine.analyse(b, load_config())
+        return engine.analyse(b, cfg)
     except Exception as e:  # engine missing/crashed: surface to the UI
         raise HTTPException(500, str(e))
 

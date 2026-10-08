@@ -189,3 +189,17 @@ input:focus,select:focus,textarea:focus{outline:2px solid #3f6b54}
 #movelist .m{position:relative}
 .gd{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:6px;vertical-align:middle;background:currentColor}
 .acc{float:right;text-transform:none;letter-spacing:0;font-weight:500;color:var(--muted)}
+/* style & openings */
+.stylecard{padding:12px 14px}
+.srow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.srow .label{margin:0}
+.seg button{padding:5px 11px;font-size:14px}
+.costlbl{font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.costlbl select{width:auto;padding:4px 8px}
+#op-card{margin-top:10px}#op-card summary{list-style:none}#op-card summary::-webkit-details-marker{display:none}
+#op-card summary .label{display:inline;margin:0}#op-sum{font-size:13px}
+.opgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px}
+.opgrid label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.book-tag{background:rgba(143,163,173,.16);color:#a9b8c0}
+.eng-tag{background:rgba(143,153,159,.12);color:var(--muted)}
+.booknote{font-size:13px;color:var(--draw);margin:2px 0 6px}

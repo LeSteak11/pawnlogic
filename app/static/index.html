@@ -6,7 +6,7 @@
 <title>Chess Lab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=5">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
 <header>
@@ -61,6 +61,17 @@
       </form>
     </div>
     <div class="right">
+      <div class="card stylecard">
+        <div class="srow"><span class="label">Style</span><div class="seg" id="style-seg"></div>
+          <label id="style-cost-wrap" class="costlbl">may cost up to <select id="style-cost"><option value="1">1%</option><option value="3">3%</option><option value="6">6%</option></select></label></div>
+        <details id="op-card"><summary><span class="label">Openings</span> <span id="op-sum" class="muted"></span></summary>
+          <div class="opgrid">
+            <label>As White<select id="op-white"></select></label>
+            <label>Black vs 1.e4<select id="op-e4"></select></label>
+            <label>Black vs 1.d4<select id="op-d4"></select></label>
+          </div>
+        </details>
+      </div>
       <div class="card rec">
         <div id="winbox" class="winbox stale">
           <div class="winrow"><span id="win-pct" class="winpct">—</span><span id="win-label" class="muted">win chance</span></div>
@@ -161,6 +172,7 @@
   </form>
 </dialog>
 <div id="toast"></div>
-<script src="/static/app.js?v=7"></script>
+<script src="/static/openings.js?v=1"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>

@@ -25,7 +25,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 /* ---------- game state ---------- */
 const S = {
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
-  pick: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
+  pick: -1, opts: null, optsFen: null, recIdx: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
 const fenAt = (i) => (i === 0 ? S.startFen : S.plies[i - 1].fen);
 const curFen = () => fenAt(S.cursor);
@@ -170,7 +170,7 @@ $("#board").addEventListener("click", (e) => {
 
 /* ---------- position / render ---------- */
 async function refresh(now = false) {
-  selected = null; S.pick = 0;
+  selected = null; S.pick = -1;
   S.st = await api("/api/state", { fen: curFen() });
   drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
   analyse(now);
@@ -286,7 +286,7 @@ $("#move-input").addEventListener("keydown", (e) => {
 /* ---------- analysis ---------- */
 let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
-const pickedCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[S.pick] || S.analysis.candidates[0] : null);
+const pickedCand = () => (S.opts && S.optsFen === curFen() ? (S.opts[S.pick >= 0 && S.pick < S.opts.length ? S.pick : S.recIdx] || S.opts[0]).c : null);
 function analyse(now = false) {
   if (E.on) return;
   clearTimeout(aTimer);
@@ -304,7 +304,7 @@ function analyse(now = false) {
     const watchdog = setTimeout(() => ctl.abort("timeout"), 10000); // never sit on "Calculating"
     try {
       for (let tries = 0; ; tries++) {
-        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen }), signal: ctl.signal });
+        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen, multipv: PREF.style !== "balanced" ? 5 : undefined }), signal: ctl.signal });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail);
         if (fen !== curFen()) return;
@@ -401,10 +401,106 @@ function renderWin(score) {
   $("#win-fill").style.width = p + "%"; $("#win-fill").style.background = col;
   $("#evalfill").style.height = p + "%";
 }
+/* ---------- play style + opening book (pick among the engine's good moves; the engine itself is unchanged) ---------- */
+const STYLES = { balanced: "Balanced", aggressive: "Aggressive", solid: "Solid", simple: "Simple" };
+const PREF = { style: store.get("cl_style", "balanced"), cost: store.get("cl_style_cost", 3), ops: store.get("cl_openings", { white: "", e4: "", d4: "" }) };
+const normSan = (s) => s.replace(/[+#!?]/g, "");
+const sqXY = (s) => ["abcdefgh".indexOf(s[0]), +s[1] - 1];
+const cheb = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+function findKing(g, ch) { for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) if (g[r][f] === ch) return [f, 7 - r]; return null; }
+function moveFeatures(c, fen, mover, win) {
+  const g = parseFen(fen), me = mover === "white", from = c.uci.slice(0, 2), to = c.uci.slice(2, 4);
+  const [ff, fr] = sqXY(from), [tf, tr] = sqXY(to), pc = g[7 - fr][ff] || "", type = pc.toLowerCase();
+  const target = g[7 - tr][tf] || "", eK = findKing(g, me ? "k" : "K"), oK = findKing(g, me ? "K" : "k");
+  const san = c.san, f = {};
+  f.check = /[+#]/.test(san);
+  f.castle = san.startsWith("O-O");
+  f.capture = san.includes("x");
+  const reply = c.pv[1] ? normSan(c.pv[1]).replace(/=[QRBN]$/, "") : "";
+  f.trade = f.capture && reply.includes("x") && reply.endsWith(to);
+  f.queenTrade = f.trade && (type === "q" || target.toLowerCase() === "q");
+  f.closer = !!eK && type !== "k" && type !== "p" && cheb([tf, tr], eK) <= 3 && cheb([tf, tr], eK) < cheb([ff, fr], eK);
+  f.pawnStorm = type === "p" && !!eK && Math.abs(tf - eK[0]) <= 2 && !f.capture && (me ? tr >= 3 : tr <= 4);
+  f.shieldPush = type === "p" && !!oK && (oK[0] <= 2 || oK[0] >= 6) && Math.abs(ff - oK[0]) <= 1 && !f.capture;
+  f.develop = (type === "n" || type === "b") && fr === (me ? 0 : 7) && S.cursor < 24;
+  f.retreat = type !== "p" && (me ? tr < fr : tr > fr);
+  f.ahead = win >= 60;
+  return f;
+}
+const BONUS = {
+  aggressive: { check: 2, closer: 1.5, pawnStorm: 1, capture: 1, queenTrade: -2, retreat: -1, castle: 0.5 },
+  solid: { castle: 3, develop: 1.5, trade: 0.5, aheadTrade: 1.5, aheadQueenTrade: 1, shieldPush: -2, pawnStorm: -1 },
+  simple: { trade: 2, queenTrade: 2, castle: 1, develop: 1, capture: 0.5, pawnStorm: -1, shieldPush: -1 },
+};
+const FEATURE_WORDS = { check: "gives check", closer: "brings a piece at their king", pawnStorm: "pushes pawns at their king", capture: "captures",
+  castle: "castles your king", develop: "develops a piece", trade: "trades pieces", aheadTrade: "trades while ahead", queenTrade: "trades queens",
+  aheadQueenTrade: "trades queens while ahead" };
+function styleScore(style, f) {
+  const B = BONUS[style] || {}, hits = [];
+  let s = 0;
+  const add = (k, on) => { if (on && B[k]) { s += B[k]; if (B[k] > 0) hits.push(k); } };
+  for (const k of ["check", "closer", "pawnStorm", "capture", "castle", "develop", "trade", "queenTrade", "shieldPush", "retreat"]) add(k, f[k]);
+  add("aheadTrade", f.trade && f.ahead); add("aheadQueenTrade", f.queenTrade && f.ahead);
+  if (hits.includes("trade") && hits.includes("capture")) hits.splice(hits.indexOf("capture"), 1);
+  return { s, hits };
+}
+// Returns { idx, why } — which engine candidate the chosen style recommends.
+function stylePick(info, fen, mover) {
+  if (PREF.style === "balanced" || info.length < 2) return { idx: 0, why: "" };
+  let best = { idx: 0, val: -Infinity, hits: [] };
+  info.forEach((o, i) => {
+    if (o.loss > PREF.cost) return;
+    const { s, hits } = styleScore(PREF.style, moveFeatures(o.c, fen, mover, o.w));
+    const val = s - o.loss * 0.3;
+    if (val > best.val + 1e-9) best = { idx: i, val, hits };
+  });
+  const name = STYLES[PREF.style], o = info[best.idx], what = best.hits.map((k) => FEATURE_WORDS[k]).slice(0, 2).join(", ");
+  return { idx: best.idx, why: best.idx === 0 ? `${name}: the engine's best already fits${what ? ` (${what})` : ""}` : `${name} pick: ${what || "fits the style"} (−${o.loss.toFixed(1)}% vs engine best)` };
+}
+function repertoireFor() {
+  if (S.viewing || S.startFen !== START) return null;
+  const hist = S.plies.slice(0, S.cursor).map((p) => normSan(p.san));
+  let key;
+  if (S.orient === "white") key = PREF.ops.white && OPENINGS.white[PREF.ops.white];
+  else if (hist[0] === "e4") key = PREF.ops.e4 && OPENINGS.e4[PREF.ops.e4];
+  else if (hist[0] === "d4") key = PREF.ops.d4 && OPENINGS.d4[PREF.ops.d4];
+  return key ? { rep: key, hist } : null;
+}
+// { san, uci, name, moveNo } when the game is still in your chosen line and it's your move; { left, name, moveNo } just after leaving it.
+function bookInfo() {
+  const r = repertoireFor();
+  if (!r || !S.st || S.st.over) return null;
+  const { rep, hist } = r, lines = rep.lines.map((l) => l.split(" "));
+  const next = lines.filter((l) => l.length > hist.length && hist.every((m, i) => l[i] === m)).map((l) => l[hist.length]);
+  if (next.length) {
+    if (S.st.turn !== S.orient) return null;
+    const san = next[0], uci = sanToUci(san);
+    return uci ? { san, uci, name: rep.name, moveNo: Math.floor(hist.length / 2) + 1 } : null;
+  }
+  let k = 0; for (const l of lines) { let i = 0; while (i < hist.length && l[i] === hist[i]) i++; k = Math.max(k, i); }
+  return k > 0 && hist.length - k <= 2 ? { left: true, name: rep.name, moveNo: Math.floor(k / 2) + 1 } : null;
+}
+function sanToUci(san) { // resolve SAN against the legal moves we already have
+  if (!S.st) return null;
+  const legal = S.st.legal, white = S.st.turn === "white";
+  if (san.startsWith("O-O")) { const u = (white ? "e1" : "e8") + (san === "O-O-O" ? (white ? "c1" : "c8") : (white ? "g1" : "g8")); return legal.includes(u) ? u : null; }
+  const m = normSan(san).match(/^([NBRQK])?([a-h])?([1-8])?x?([a-h][1-8])(=[QRBN])?$/);
+  if (!m) return null;
+  const [, piece = "P", df, dr, dest, promo] = m, g = parseFen(curFen());
+  const hits = legal.filter((u) => {
+    if (u.slice(2, 4) !== dest) return false;
+    const pc = g[8 - +u[1]]["abcdefgh".indexOf(u[0])];
+    if (!pc || pc.toUpperCase() !== piece) return false;
+    if (df && u[0] !== df) return false;
+    if (dr && u[1] !== dr) return false;
+    return promo ? u[4] === promo[1].toLowerCase() : u.length === 4;
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
 function cyclePick(d) {
-  const a = S.analysis;
-  if (!a || a.fen !== curFen() || !a.candidates || a.candidates.length < 2) return;
-  S.pick = (S.pick + d + a.candidates.length) % a.candidates.length;
+  const n = (S.opts || []).length;
+  if (n < 2 || S.optsFen !== curFen()) return;
+  S.pick = ((S.pick < 0 ? S.recIdx : S.pick) + d + n) % n;
   renderAnalysis(false); drawBoard();
 }
 function clearRec(big, sub) {
@@ -415,24 +511,39 @@ function clearRec(big, sub) {
 function renderAnalysis(busy) {
   const a = S.analysis, ok = a && a.fen === curFen() && a.candidates;
   renderRecHead();
-  if (busy && !ok) return clearRec("…", "Calculating");
-  if (!ok) return;
-  if (!a.candidates.length) return clearRec("—", S.st.over ? "The game is over." : "No legal move.");
-  const mover = S.st.turn, cands = a.candidates, top = winPct(cands[0].score, mover);
-  const info = cands.map((c, i) => { const w = winPct(c.score, mover), loss = Math.max(0, top - w); return { c, w, loss, grade: i === 0 ? "Best" : gradeOf(loss) }; });
-  if (S.pick >= cands.length) S.pick = 0;
-  const p = cands[S.pick], only = info.length > 1 && info[1].loss >= 10;
-  $("#best-move").textContent = p.san; $("#best-desc").textContent = moveDesc(p);
-  $("#best-eval").textContent = `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score);
-  $("#best-info").textContent = `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side`;
-  renderWin(cands[0].score);
-  $("#cands").innerHTML = `<div class="candhead">Move options <span>↑ ↓ to switch · Enter to play</span></div>` + info.map(({ c, w, grade }, i) => `
-    <div class="cand${i === S.pick ? " on" : ""}" data-i="${i}">
-      <div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b>${i === 0 ? `<span class="tag rec-tag">Recommended</span>` : ""}${i === 0 && only ? `<span class="tag only-tag">Only move</span>` : ""}
-        <span class="spacer"></span><span class="grade ${gcls(grade)}">${grade}</span><span class="cw">${Math.round(w)}%</span></div>
-      <div class="cbar"><i style="width:${w}%;background:${winColor(w)}"></i></div>
+  const book = bookInfo();
+  if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", "Calculating") : undefined; }
+  if (ok && !a.candidates.length) { S.opts = null; return clearRec("—", S.st.over ? "The game is over." : "No legal move."); }
+  const mover = S.st.turn, cands = ok ? a.candidates : [], top = cands.length ? winPct(cands[0].score, mover) : null;
+  let info = cands.map((c, i) => { const w = winPct(c.score, mover), loss = Math.max(0, top - w); return { c, w, loss, grade: i === 0 ? "Best" : gradeOf(loss) }; });
+  let rec = stylePick(info, curFen(), mover);
+  if (book && book.uci) { // your opening: the book move leads, graded by the engine when it's one of its options
+    const at = info.findIndex((o) => o.c.uci === book.uci);
+    const bo = at >= 0 ? info.splice(at, 1)[0] : { c: { uci: book.uci, san: book.san, pv: [book.san], score: null }, w: null, loss: null, grade: null };
+    bo.book = true; info.unshift(bo);
+    rec = { idx: 0, why: `Book: ${book.name}, move ${book.moveNo}` + (bo.loss != null && bo.loss >= 5 ? ` (engine prefers ${cands[0].san}, −${bo.loss.toFixed(0)}%)` : "") };
+  }
+  S.opts = info; S.optsFen = curFen(); S.recIdx = rec.idx;
+  const pick = S.pick >= 0 && S.pick < info.length ? S.pick : rec.idx, p = info[pick].c;
+  const only = info.length > 1 && cands.length > 1 && winPct(cands[0].score, mover) - winPct(cands[1].score, mover) >= 10;
+  $("#best-move").textContent = p.san;
+  $("#best-desc").textContent = moveDesc(p) + (pick === rec.idx && rec.why ? ` · ${rec.why}` : "");
+  if (p.score) { $("#best-eval").textContent = `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score); }
+  else { $("#best-eval").textContent = "Book move · engine still thinking"; $("#best-eval").className = "evtag even"; }
+  $("#best-info").textContent = ok ? `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side` : "";
+  renderWin(cands.length ? cands[0].score : null);
+  const left = book && book.left ? `<div class="booknote">Opponent left the ${esc(book.name)} at move ${book.moveNo}: engine${PREF.style !== "balanced" ? ` + ${STYLES[PREF.style]}` : ""} from here</div>` : "";
+  $("#cands").innerHTML = left + `<div class="candhead">Move options <span>↑ ↓ to switch · Enter to play</span></div>` + info.map((o, i) => {
+    const { c, w, grade } = o, engineTop = !o.book && c === cands[0];
+    const tags = (i === rec.idx ? `<span class="tag rec-tag">Recommended</span>` : "") + (o.book ? `<span class="tag book-tag">Book</span>` : "")
+      + (engineTop && i !== rec.idx ? `<span class="tag eng-tag">Engine #1</span>` : "") + (engineTop && only ? `<span class="tag only-tag">Only move</span>` : "");
+    return `<div class="cand${i === pick ? " on" : ""}" data-i="${i}">
+      <div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b>${tags}
+        <span class="spacer"></span>${grade ? `<span class="grade ${gcls(grade)}">${grade}</span>` : ""}<span class="cw">${w == null ? "…" : Math.round(w) + "%"}</span></div>
+      <div class="cbar"><i style="width:${w || 0}%;background:${w == null ? "transparent" : winColor(w)}"></i></div>
       <div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc(c.pv.slice(1, 4).join(" "))}</span></div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 $("#cands").addEventListener("click", (e) => { const c = e.target.closest(".cand"); if (c) { S.pick = +c.dataset.i; renderAnalysis(false); drawBoard(); } });
 $("#cands").addEventListener("dblclick", (e) => { const c = e.target.closest(".cand"), m = pickedCand(); if (c && m) playText(m.uci); });
@@ -790,4 +901,30 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
   }
   refresh();
   $("#move-input").focus();
+})();
+
+/* ---------- style & openings controls ---------- */
+(function initStyleControls() {
+  const seg = $("#style-seg");
+  seg.innerHTML = Object.entries(STYLES).map(([k, v]) => `<button data-style="${k}">${v}</button>`).join("");
+  const paint = () => {
+    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.style === PREF.style));
+    $("#style-cost-wrap").classList.toggle("hidden", PREF.style === "balanced");
+    const names = [["white", "White"], ["e4", "vs e4"], ["d4", "vs d4"]].filter(([k]) => PREF.ops[k]).map(([k, l]) => `${l}: ${OPENINGS[k][PREF.ops[k]].name}`);
+    $("#op-sum").textContent = names.length ? names.join(" · ") : "engine chooses";
+  };
+  seg.onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    PREF.style = b.dataset.style; store.set("cl_style", PREF.style); paint();
+    S.pick = -1; S.analysis = null; if (S.st) analyse(true); // style needs 5 options instead of 3: ask again
+  };
+  $("#style-cost").value = String(PREF.cost);
+  $("#style-cost").onchange = (e) => { PREF.cost = +e.target.value; store.set("cl_style_cost", PREF.cost); S.pick = -1; if (S.st) renderAnalysis(false), drawBoard(); };
+  for (const k of ["white", "e4", "d4"]) {
+    const sel = $("#op-" + k);
+    sel.innerHTML = `<option value="">Engine chooses</option>` + Object.entries(OPENINGS[k]).map(([id, o]) => `<option value="${id}">${o.name}</option>`).join("");
+    sel.value = PREF.ops[k] && OPENINGS[k][PREF.ops[k]] ? PREF.ops[k] : "";
+    sel.onchange = () => { PREF.ops[k] = sel.value; store.set("cl_openings", PREF.ops); paint(); S.pick = -1; if (S.st) renderAnalysis(false), drawBoard(); };
+  }
+  paint();
 })();
