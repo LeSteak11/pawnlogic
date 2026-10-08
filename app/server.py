@@ -214,7 +214,7 @@ def _game_record(body, auto_result):
         result = RESULT_FROM_CHOICE[choice]
     else:
         bad("Unknown result")
-    ended = ENDED.get(outcome.termination.name, "over") if outcome else ("in progress" if result == "*" else "result entered")
+    ended = ENDED.get(outcome.termination.name, "over") if outcome else ("in progress" if result == "*" else (body.get("how") or "result entered")[:40])
     opp = (body.get("opponent") or "").strip()
     site = (body.get("site") or "").strip() or None
     now = datetime.now()
@@ -261,6 +261,27 @@ def game(gid: str):
         plies.append(entry(b, mv))
     g.pop("pgn")
     return {**g, "plies": plies}
+
+
+@app.post("/api/games/{gid}/result")
+def set_result(gid: str, body: dict = Body(...)):
+    """Record how a game ended when the board can't show it (resignation, timeout, agreed draw)."""
+    g = db.get_game(gid)
+    if not g:
+        raise HTTPException(404, "Game not found")
+    choice, how = body.get("result"), (body.get("how") or "resigned / time").strip()[:40]
+    if choice in ("win", "loss"):
+        if not g["my_color"]:
+            bad("This game has no colour for you, so win/loss can't be worked out")
+        result = "1-0" if (choice == "win") == (g["my_color"] == "white") else "0-1"
+    elif choice == "draw":
+        result = "1/2-1/2"
+    else:
+        bad("Pick win, loss or draw")
+    game = chess.pgn.read_game(io.StringIO(g["pgn"]))
+    game.headers["Result"], game.headers["Termination"] = result, how
+    db.set_result(gid, result, str(game), how)
+    return {"id": gid, "result": result}
 
 
 @app.delete("/api/games/{gid}")

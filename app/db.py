@@ -127,6 +127,12 @@ def get_game(gid):
     return dict(r) if r else None
 
 
+def set_result(gid, result, pgn, ended):
+    conn().execute("UPDATE games SET result=?, pgn=?, ended=?, updated_at=? WHERE id=?",
+                   (result, pgn, ended, datetime.now(timezone.utc).isoformat(timespec="seconds"), gid))
+    conn().commit()
+
+
 def delete_game(gid):
     c = conn().execute("DELETE FROM games WHERE id = ?", (gid,))
     conn().commit()

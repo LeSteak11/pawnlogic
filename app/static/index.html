@@ -6,7 +6,7 @@
 <title>Chess Lab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 <header>
@@ -93,6 +93,8 @@
         <div class="label">Moves <span id="moves-count"></span><span id="acc" class="acc"></span></div>
         <div id="movelist" class="movelist"></div>
         <div id="moves-note" class="muted tiny"></div>
+        <div id="endrow" class="endrow hidden"><span class="muted">Resigned or out of time?</span>
+          <button data-end="win">I won</button><button data-end="loss">I lost</button><button data-end="draw">Draw</button></div>
       </div>
       <details class="card" id="import-card">
         <summary>Import FEN / PGN</summary>
@@ -177,6 +179,6 @@
 </dialog>
 <div id="toast"></div>
 <script src="/static/openings.js?v=1"></script>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

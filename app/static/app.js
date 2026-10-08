@@ -582,6 +582,7 @@ function updateSaveForm() {
   if (!n) sc.open = false;
   wasOver = S.st.over;
   $("#save-card").classList.toggle("hidden", !!S.viewing);
+  $("#endrow").classList.toggle("hidden", !!S.viewing || !n || S.st.over || S.gameFinal);
   const auto = $("#f-result").querySelector('[value="auto"]');
   auto.disabled = !(S.st && S.st.over && S.cursor === S.plies.length);
   if (auto.disabled && $("#f-result").value === "auto") $("#f-result").value = "win";
@@ -612,8 +613,15 @@ function renderBanner() {
   const g = S.viewing;
   b.classList.remove("hidden");
   b.innerHTML = `Viewing saved game vs <b>${esc(g.opponent || "?")}</b> · ${esc(g.result)} <span class="spacer"></span>
+    ${g.result === "*" && g.my_color ? `<span class="muted">Set result:</span><button data-res="win">Won</button><button data-res="loss">Lost</button><button data-res="draw">Draw</button>` : ""}
     <a class="btn" href="/api/games/${g.id}/pgn" download>Export PGN</a><button id="b-new">New game</button>`;
   $("#b-new").onclick = () => newGame(START);
+  b.querySelectorAll("[data-res]").forEach((btn) => btn.onclick = async () => {
+    try {
+      const r = await api(`/api/games/${g.id}/result`, { result: btn.dataset.res });
+      g.result = r.result; renderBanner(); toast(`Result saved: ${r.result}`);
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 /* ---------- unsaved-game draft (survives closing the window) ---------- */
@@ -988,3 +996,18 @@ document.body.classList.toggle("blitz", PREF.blitz); $("#blitz-btn").classList.t
   r.oninput = () => { PREF.level = +r.value; store.set("cl_level", PREF.level); paint(); };
   r.onchange = () => { S.pick = -1; S.analysis = null; if (S.st) analyse(true); };
 })();
+
+/* ---------- finish a game the board can't show as over (resignation, timeout, agreed draw) ---------- */
+$("#endrow").addEventListener("click", async (e) => {
+  const choice = e.target.dataset.end;
+  if (!choice || !S.plies.length) return;
+  flushAutosave();
+  while (asBusy) await new Promise((res) => setTimeout(res, 50)); // let the last auto-save land so we update that record
+  clearTimeout(asTimer); asPending = null;
+  try {
+    const r = await api("/api/games", { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null),
+      my_color: S.orient, source: "assisted", result: choice, how: "resigned / time", opponent: S.live.opponent || $("#f-opp").value, site: S.live.site });
+    S.gameId = r.id; S.gameFinal = true; persistDraft(); updateSaveForm();
+    toast(`Saved: ${choice === "draw" ? "draw" : choice === "win" ? "you won" : "you lost"} (${r.result}). It's in History.`);
+  } catch (err) { toast(err.message, true); }
+});

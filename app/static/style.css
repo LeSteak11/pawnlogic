@@ -227,3 +227,7 @@ body.blitz #best-info,body.blitz .cdesc,body.blitz .candhead span{display:none}
 body.blitz .cand{padding:6px 10px;margin-bottom:4px}
 body.blitz .cbar{margin:5px 0 0}
 @media (prefers-reduced-motion:reduce){.blitz-btn.on,body.blitz .card.rec::before{animation:none}}
+/* finish a resigned / timed-out game */
+.endrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+.endrow button{padding:4px 10px;font-size:13px}
+#banner [data-res]{padding:4px 10px}
