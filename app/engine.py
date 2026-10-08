@@ -100,6 +100,7 @@ class StockfishEngine(Engine):
         self.proc = None
         self.opts_key = None
         self.cache = {}       # (fen, settings) -> result, so revisiting a position is instant
+        self.inflight = {}    # (fen, settings) -> Event; a second request for the same position waits for it
 
     def _ensure(self, cfg):
         key = (str(engine_path(cfg)), json.dumps(uci_options(cfg), sort_keys=True))
@@ -121,6 +122,20 @@ class StockfishEngine(Engine):
         ckey = (board.fen(), json.dumps(cfg, sort_keys=True))
         if ckey in self.cache:
             return self.cache[ckey]
+        ev = self.inflight.get(ckey)
+        if ev is not None:  # same position already being searched (another tab, a retry): share it, don't cancel it
+            ev.wait(30)
+            if ckey in self.cache:
+                return self.cache[ckey]
+        ev = self.inflight[ckey] = threading.Event()
+        try:
+            return self._search(board, cfg, ckey)
+        finally:
+            ev.set()
+            if self.inflight.get(ckey) is ev:
+                del self.inflight[ckey]
+
+    def _search(self, board, cfg, ckey):
         self.gen += 1
         mine = self.gen
         with self.lock:

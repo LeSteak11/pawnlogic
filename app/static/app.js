@@ -286,19 +286,25 @@ function analyse(now = false) {
   }
   renderAnalysis(true);
   aTimer = setTimeout(async () => {
-    const fen = curFen(); aborter = new AbortController();
+    const fen = curFen(), ctl = aborter = new AbortController();
     const t0 = performance.now();
+    const watchdog = setTimeout(() => ctl.abort("timeout"), 10000); // never sit on "Calculating"
     try {
-      const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen }), signal: aborter.signal });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.detail);
-      if (d.superseded || fen !== curFen()) return;
-      S.analysis = { ...d, fen, secs: (performance.now() - t0) / 1000 };
-      renderAnalysis(false); drawBoard();
+      for (let tries = 0; ; tries++) {
+        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen }), signal: ctl.signal });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.detail);
+        if (fen !== curFen()) return;
+        if (d.superseded) { if (tries < 3) continue; throw new Error("Engine busy — try again"); } // cancelled by another request: ask again
+        S.analysis = { ...d, fen, secs: (performance.now() - t0) / 1000 };
+        renderAnalysis(false); drawBoard();
+        return;
+      }
     } catch (err) {
+      if (ctl.signal.reason === "timeout" && fen === curFen()) return analyse(true); // stuck request: start over
       if (err.name === "AbortError") return;
       $("#best-move").textContent = "Engine error"; $("#best-info").textContent = err.message;
-    }
+    } finally { clearTimeout(watchdog); }
   }, now ? 0 : 120); // the short wait only batches quick arrow-key stepping
 }
 const PIECE_NAMES = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
@@ -642,7 +648,9 @@ $("#sync-on").onchange = (e) => { store.set("cl_sync", e.target.checked); syncSe
   let seen = -1;
   for (;;) {
     try {
-      const d = await api(`/api/sync?after=${seen}`);
+      const t = performance.now(), d = await api(`/api/sync?after=${seen}`);
+      // an outdated server answers instantly instead of waiting; never spin on it
+      if (d.seq === seen && performance.now() - t < 1000) await new Promise((res) => setTimeout(res, 1000));
       seen = d.seq;
       while (syncBusy) await new Promise((res) => setTimeout(res, 30));
       await syncTick(d);
