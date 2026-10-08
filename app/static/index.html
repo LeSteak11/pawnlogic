@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=13">
+<link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
 <div id="gold-flash" aria-hidden="true"></div>
@@ -31,10 +31,10 @@
       <div id="banner" class="banner hidden"></div>
       <div id="statusbar"><span id="turn-chip" class="chip"></span><span id="sync-chip" class="chip hidden"></span><span id="clock-chip" class="chip clockchip hidden"></span></div>
       <div class="optrow">
-        <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess computer games)</label>
-        <button id="sync-reconnect" class="sync-reconnect" title="Forget the old tab and reconnect to the open computer game">↻ Reconnect</button>
+        <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess)</label>
+        <button id="sync-reconnect" class="sync-reconnect" title="Forget the old tab and reconnect to a game on your extension's enabled pages">↻ Reconnect</button>
         <label><input type="checkbox" id="only-mine"> Only recommend on my turn</label>
-        <span class="muted tiny hint-wide">Your colour follows the board automatically.</span>
+        <label>I play <select id="player-color" aria-label="Your playing color"><option value="auto">Auto</option><option value="white">White</option><option value="black">Black</option></select></label>
       </div>
       <div class="boardwrap"><div id="evalbar"><span class="el">Opp</span><div class="evtrack"><div id="evalfill"></div></div><span class="el">You</span></div><div id="board"></div></div>
       <div class="navrow">
@@ -185,6 +185,6 @@
 <div id="toast"></div>
 <script src="/static/vendor/confetti.browser.js"></script>
 <script src="/static/openings.js?v=1"></script>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>

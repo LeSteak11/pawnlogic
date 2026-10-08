@@ -42,6 +42,7 @@ def main():
     archive = dist / f'ChessLab-Sync-{args.version}.zip'
     manifest = json.loads((ROOT / 'extension/manifest.json').read_text())
     manifest['version'] = args.version
+    manifest['icons'] = {str(size): f'icons/icon-{size}.png' for size in (16, 32, 48, 128)}
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('manifest.json', json.dumps(manifest, indent=2))
         for filename in ('background.js', 'content.js'):

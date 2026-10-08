@@ -1,7 +1,9 @@
 // Relays board snapshots from Chess.com / Lichess game tabs to the local Chess Lab server, tagged per tab.
 // Also handles Chess Lab's "Reconnect": re-attaches to open game tabs and asks them for a fresh snapshot.
 const SERVER = "http://127.0.0.1:8765/";
-const GAME_URLS = ["https://www.chess.com/play/computer*", "https://www.chess.com/game/computer/*", "https://lichess.org/*"];
+// The manifest is the single source of truth for supported game URLs. Reconnect
+// must include the same pages as automatic content-script injection.
+const GAME_URLS = [...new Set(chrome.runtime.getManifest().content_scripts.flatMap((s) => s.matches))];
 
 async function reattach() { // inject the reader into game tabs that are already open (no tab refresh needed)
   const tabs = await chrome.tabs.query({ url: GAME_URLS });

@@ -1,9 +1,19 @@
-// Read-only: reports piece placement and board orientation for computer games. It never clicks, types or moves anything.
+// Read-only: reports piece placement and orientation on the pages allowed by the manifest.
+// It never clicks, types or moves anything.
 // Wrapped so Chess Lab's "Reconnect" can inject it again into an open tab without doubling up.
 (() => {
 const alive = () => { try { return !!chrome.runtime.id; } catch { return false; } };
 if (window.__chessLabSync && window.__chessLabSync.alive()) { window.__chessLabSync.resend(); return; }
 const IS_LICHESS = location.hostname === "lichess.org";
+const GAME_URLS = chrome.runtime.getManifest().content_scripts.flatMap((s) => s.matches);
+function allowedPage() {
+  // Match the manifest's URL globs, including SPA navigation after injection.
+  // Do not impose a second, narrower hard-coded list of Chess.com routes.
+  return GAME_URLS.some((pattern) => {
+    const expression = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+    return new RegExp("^" + expression + "$").test(location.origin + location.pathname);
+  });
+}
 
 function toPlacement(grid) { // grid[0] = rank 8
   const flat = grid.flat();
@@ -15,10 +25,31 @@ function toPlacement(grid) { // grid[0] = rank 8
   }).join("/");
 }
 
+function chesscomFlipped(board) {
+  // Board class names vary between Chess.com's layouts. The actual screen
+  // positions of known squares provide an independent orientation signal.
+  const bounds = board.getBoundingClientRect();
+  let white = 0, black = 0;
+  if (bounds.width > 0 && bounds.height > 0) {
+    for (const piece of board.querySelectorAll(".piece")) {
+      const square = piece.className.match(/square-([1-8])([1-8])/);
+      if (!square || piece.classList.contains("dragging")) continue;
+      const rect = piece.getBoundingClientRect();
+      if (!rect.width || !rect.height) continue;
+      const f = +square[1] - 1, r = +square[2] - 1;
+      const x = ((rect.left + rect.width / 2 - bounds.left) / bounds.width) * 8 - .5;
+      const y = ((rect.top + rect.height / 2 - bounds.top) / bounds.height) * 8 - .5;
+      if (Math.abs(x - f) < .35 && Math.abs(y - (7 - r)) < .35) white++;
+      if (Math.abs(x - (7 - f)) < .35 && Math.abs(y - r) < .35) black++;
+    }
+  }
+  if (black >= 2 && black > white) return true;
+  if (white >= 2 && white > black) return false;
+  return board.classList.contains("flipped");
+}
+
 function readChesscom() {
-  // A content script survives SPA navigation; stop reporting if the user leaves
-  // the computer-game route for a human game in the same tab.
-  if (!/^\/(?:play\/computer(?:\/|$)|game\/computer\/)/.test(location.pathname)) return null;
+  if (!allowedPage()) return null;
   const b = document.querySelector("wc-chess-board, chess-board");
   if (!b) return null;
   const grid = Array.from({ length: 8 }, () => Array(8).fill(null));
@@ -33,7 +64,7 @@ function readChesscom() {
   }
   const placement = toPlacement(grid);
   const opp = document.querySelector('.player-top [data-test-element="user-tagline-username"], #board-layout-player-top .user-username-component, .player-top .user-username-component');
-  return placement && { placement, flipped: b.classList.contains("flipped"), opponent: opp ? opp.textContent.trim().slice(0, 60) : "" };
+  return placement && { placement, flipped: chesscomFlipped(b), opponent: opp ? opp.textContent.trim().slice(0, 60) : "" };
 }
 
 // Lichess: only games against Stockfish ("Stockfish level N"); pieces are positioned by pixel offsets.

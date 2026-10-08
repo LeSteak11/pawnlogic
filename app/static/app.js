@@ -246,8 +246,21 @@ document.addEventListener("keydown", (e) => {
   else if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key) && !e.ctrlKey && !e.metaKey) $("#move-input").focus();
 });
 
-$("#btn-flip").onclick = () => { S.orient = S.orient === "white" ? "black" : "white"; $("#f-color").value = S.orient; drawBoard(); S.st && analyse(); };
-$("#f-color").onchange = (e) => { S.orient = e.target.value; drawBoard(); S.st && analyse(); };
+let playerColor = store.get("cl_player_color", "auto");
+if (!["auto", "white", "black"].includes(playerColor)) playerColor = "auto";
+function syncColor(d) { return playerColor === "auto" ? (d.flipped ? "black" : "white") : playerColor; }
+function choosePlayerColor(color) {
+  playerColor = color; store.set("cl_player_color", color); $("#player-color").value = color;
+  if (color !== "auto") S.orient = color;
+  else if (syncLast && syncLast.connected) S.orient = syncColor(syncLast);
+  $("#f-color").value = S.orient; S.pick = -1;
+  if (E.on) buildPalette();
+  drawBoard(); if (S.st) { renderStatus(); renderMoves(); analyse(true); }
+}
+$("#player-color").value = playerColor;
+$("#player-color").onchange = (e) => choosePlayerColor(e.target.value);
+$("#btn-flip").onclick = () => choosePlayerColor(S.orient === "white" ? "black" : "white");
+$("#f-color").onchange = (e) => choosePlayerColor(e.target.value);
 $("#only-mine").checked = store.get("cl_onlymine", true);
 $("#only-mine").onchange = (e) => { store.set("cl_onlymine", e.target.checked); S.analysis = null; analyse(); };
 $("#btn-undo").onclick = () => {
@@ -870,7 +883,7 @@ const START_PLACEMENT = START.split(" ")[0];
 function renderSyncChip(d) {
   const on = $("#sync-on").checked, site = d.site === "lichess" ? "Lichess" : d.site === "chess.com" ? "Chess.com" : "game";
   $("#sync-chip").textContent = d.connected ? `● Synced with ${site} tab` + (d.tabs > 1 ? ` (${d.tabs} open, follows the one you use)` : "")
-    : reconnecting ? "↻ Reconnecting to the open game…" : "○ Waiting for a Chess.com / Lichess computer game";
+    : reconnecting ? "↻ Reconnecting to the open game…" : "○ Waiting for a Chess.com / Lichess game";
   $("#sync-chip").className = "chip " + (d.connected ? "mine" : "opp") + (on ? "" : " hidden");
   if (d.connected) reconnecting = false;
 }
@@ -888,13 +901,13 @@ async function syncTick(d) {
       requestSyncReconnect(false);
     }
     if ($("#sync-on").checked && d.connected && d.placement && !S.viewing && S.cursor === S.plies.length) {
-      const col = d.flipped ? "black" : "white"; // board drawn from Black's side = you're Black
-      if (col !== S.orient) { S.orient = col; $("#f-color").value = col; S.pick = -1; drawBoard(); renderMoves(); renderRecHead(); if (S.st) analyse(true); }
+      const col = syncColor(d); // manual color wins over the extension's reported orientation
+      if (col !== S.orient) { S.orient = col; $("#f-color").value = col; S.pick = -1; drawBoard(); renderMoves(); if (S.st) { renderStatus(); analyse(true); } }
     }
     if (!$("#sync-on").checked || !d.connected || d.seq === syncSeq || !d.placement) return;
     if (S.cursor !== S.plies.length) return; // you're reviewing an earlier move; don't jump
     const end = S.plies.length ? S.plies[S.plies.length - 1].fen : S.startFen;
-    const r = await api("/api/sync/apply", { fen: end, placement: d.placement, flipped: d.flipped });
+    const r = await api("/api/sync/apply", { fen: end, placement: d.placement, flipped: syncColor(d) === "black" });
     if (r.mode === "reset" && d.placement !== START_PLACEMENT && S.plies.length) {
       // a board we can't reach from this game: a real jump, or a half-drawn frame. Only rebuild if it holds for 1.2 s.
       if (!farSince || farSince.p !== d.placement) { farSince = { p: d.placement, t: Date.now() }; setTimeout(() => syncTick(), 1300); return; }
@@ -907,7 +920,7 @@ async function syncTick(d) {
       lastP.clk = mover === S.orient ? d.my_clock : d.opp_clock; // time left after that move (saved as [%clk])
       S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh(true);
     } else if (r.mode === "reset") {
-      S.orient = r.color; $("#f-color").value = r.color; newGame(r.fen);
+      S.orient = syncColor(d); $("#f-color").value = S.orient; newGame(r.fen);
     }
   } catch {} finally { syncBusy = false; }
 }
@@ -921,7 +934,7 @@ async function requestSyncReconnect(manual) {
   renderSyncChip({ connected: false, site: "", tabs: 0 });
   try {
     await api("/api/sync/reconnect", {});
-    if (manual) toast("Reconnect requested — keep the computer game tab open");
+    if (manual) toast("Reconnect requested — keep the game tab open");
     // A healthy reader reports within a couple seconds. If it was detached, the
     // extension's service-worker fallback may take up to 30 seconds to re-inject it.
     setTimeout(() => syncTick(), 300);
@@ -970,6 +983,7 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
       toast("Restored your unsaved game");
     } catch { clearDraft(); }
   }
+  if (playerColor !== "auto") { S.orient = playerColor; $("#f-color").value = S.orient; }
   refresh();
   $("#move-input").focus();
 })();

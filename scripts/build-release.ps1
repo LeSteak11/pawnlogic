@@ -22,6 +22,8 @@ foreach ($script in @('app/static/app.js','extension/content.js','extension/back
   Invoke-Checked 'node' @('--check', $script)
 }
 Invoke-Checked $python @('-m','unittest','discover','-s','tests','-v')
+Invoke-Checked 'node' @('tests/extension-sync.test.js')
+Invoke-Checked 'node' @('tests/player-color.test.js')
 Invoke-Checked $python @('scripts/prepare-release.py','--version',$Version)
 Invoke-Checked $python @('-m','PyInstaller','--noconfirm','packaging/chesslab.spec')
 if (!$SkipInstaller) {

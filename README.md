@@ -25,12 +25,13 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 - Source types: **assisted** (engine used), **independent** (no engine), **experiment** (engine-vs-engine, Phase 2). Stats are never mixed silently: the Dashboard has a filter. Win % = wins / scored games; unfinished games and experiments aren't scored.
 
 ## Auto-sync from Chess.com computer games (optional)
-`extension/` is a small read-only Chrome extension. It runs only on Chess.com's play-the-computer pages, reads which pieces are where, and sends that to Chess Lab on this PC. It never clicks or plays moves.
+`extension/` is a small read-only Chrome extension. It reads boards on the Chess.com pages enabled by `extension/manifest.json` and sends snapshots to Chess Lab on this PC. The enabled list includes computer games, `/play/online`, `/game/`, and `/game/*` (including numbered live-game URLs). Reconnect follows this same list, so entering a game from the lobby does not detach the reader. It never clicks or plays moves.
 1. Chrome > `chrome://extensions` > turn on *Developer mode* > *Load unpacked* > pick the `extension` folder.
 2. Open Chess Lab, leave *Auto-sync from Chess.com* ticked, then start a computer game on Chess.com.
 3. Chess Lab shows "connected", follows both sides' moves, and recommends your move. Don't type moves while sync is on.
-Also works on Lichess games against Stockfish ("Stockfish level N") on lichess.org; human games are never read. After updating the extension, click its reload button in the extensions page and refresh the tab.
+Also works on Lichess games against Stockfish ("Stockfish level N") on lichess.org; the Lichess reader ignores human games. Chess.com boards on enabled online pages are read without checking opponent type. After updating the extension, click its reload button in the extensions page and refresh the game tab.
 When a connected game feed drops, Chess Lab now makes one automatic reconnect attempt. If a new game still stays on "Waiting", click **Reconnect** beside Auto-sync. It forgets the old tab and asks the extension for a fresh board snapshot; keep the computer-game tab open (the fallback can take up to 30 seconds).
+**I play** defaults to Auto and follows the synced board orientation. Choose White or Black to lock your color with your pieces at the bottom; Flip also locks the new color. Return to Auto to follow the game tab again. Manual selection survives reconnects, new-game resets, and reopening the app.
 Chess.com can change its page layout, which would break the reader; the manual move box always works as a fallback.
 
 ## Experiments (engine vs engine)

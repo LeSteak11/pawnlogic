@@ -4,13 +4,13 @@ Upload `dist/ChessLab-Sync-<version>.zip` at https://chrome.google.com/webstore/
 
 ## Short description
 
-Sync computer chess games with Chess Lab on your PC. Read-only, local-only board and clock synchronization.
+Sync supported chess game pages with Chess Lab on your PC. Read-only, local-only board and clock synchronization.
 
 ## Listing description
 
-Chess Lab Sync connects computer-opponent practice games to the Chess Lab desktop application on your Windows PC.
+Chess Lab Sync connects supported chess game pages to the Chess Lab desktop application on your Windows PC.
 
-Supported games: Chess.com computer games and Lichess games against Stockfish.
+Supported pages: Chess.com computer-game pages, `/play/online`, `/game/`, and `/game/*` (including numbered live-game URLs), plus Lichess games against Stockfish.
 
 The extension reads the displayed board, orientation, opponent name and clocks, then sends a snapshot to Chess Lab on the same computer. It follows the game tab you use and supports Chess Lab's Reconnect control. It never clicks, types, or makes a move on the chess website.
 
@@ -20,7 +20,7 @@ Game information stays on your computer. No cloud account, analytics, ads, or re
 
 ## Single purpose
 
-Read-only synchronization of supported computer chess games with the user's locally running Chess Lab desktop application.
+Read-only synchronization of chess boards on supported pages with the user's locally running Chess Lab desktop application.
 
 ## Permission justifications
 
@@ -28,7 +28,7 @@ Read-only synchronization of supported computer chess games with the user's loca
 - `alarms`: poll the local application for a reconnect request when no page reader is reporting.
 - `storage`: persist the last handled reconnect-generation number across service-worker restarts.
 - `http://127.0.0.1:8765/*`: transmit board snapshots to the locally running desktop application and read its reconnect signal.
-- Chess.com computer-game URLs: read the displayed computer-game board, orientation, opponent name and clocks.
+- Enabled Chess.com game URLs: read the displayed board, orientation, opponent name and clocks. Online boards are included; Chess.com opponent type is not filtered.
 - `https://lichess.org/*`: Lichess game URLs do not encode whether the opponent is a computer; the reader verifies the Stockfish opponent label before transmitting.
 
 ## Privacy fields and review instructions
