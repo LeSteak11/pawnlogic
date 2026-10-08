@@ -38,7 +38,7 @@ function readLichess() {
   const black = wrap.classList.contains("orientation-black");
   const grid = Array.from({ length: 8 }, () => Array(8).fill(null));
   for (const p of board.querySelectorAll("piece")) {
-    if (p.classList.contains("anim") || p.classList.contains("dragging")) return null; // mid-move: wait
+    if (p.classList.contains("dragging")) return null; // being dragged: wait (animating pieces fail the on-square check below)
     if (p.classList.contains("ghost") || p.classList.contains("fading")) continue;
     const m = (p.style.transform || "").match(/translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px/);
     const kind = (p.className.match(/\b(pawn|knight|bishop|rook|queen|king)\b/) || [])[1];
