@@ -1,4 +1,5 @@
 """Chess Lab local server: JSON API + static UI."""
+import hashlib
 import io
 import os
 import re
@@ -56,6 +57,27 @@ def timeline(start_fen: str, ucis: list) -> list:
             bad(f"Illegal move {u}")
         out.append(entry(b, mv))
     return out
+
+
+def code_version() -> str:
+    h = hashlib.md5()
+    for f in sorted(Path(__file__).parent.glob("*.py")):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:12]
+
+
+@app.get("/api/version")
+def version():
+    return {"version": code_version()}
+
+
+@app.post("/api/shutdown")
+def shutdown():
+    """Used by the launcher to replace an outdated server after an update."""
+    if runner.running:
+        bad("An experiment is running")
+    threading.Timer(0.3, lambda: (engine.close(), os._exit(0))).start()
+    return {"ok": True}
 
 
 @app.get("/api/ping")
