@@ -240,3 +240,5 @@ body.blitz .card,body.blitz .tile{transition:background-color .9s,border-color .
 #gold-flash{position:fixed;inset:0;pointer-events:none;z-index:90;background:#d6b45e;opacity:0}
 #gold-flash.go{animation:goldFlash 1s ease-out}
 @keyframes goldFlash{0%{opacity:0}14%{opacity:.62}100%{opacity:0}}
+.brand{display:inline-flex;align-items:center;gap:9px}
+.brand-icon{width:28px;height:28px;display:block}
