@@ -3,9 +3,6 @@
   --accent: #6aa7ff; --good: #5ec27a; --bad: #e5645f; --draw: #c9a94a;
   --sq-light: #e8dcc4; --sq-dark: #a47c58; --hl: rgba(255, 220, 80, .45);
 }
-@media (prefers-color-scheme: light) {
-  :root { --bg: #f2f3f6; --panel: #fff; --panel2: #eef0f4; --line: #d6d9e2; --text: #1b1e26; --muted: #6a7184; --accent: #2f6fe0; }
-}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 "Segoe UI", system-ui, sans-serif; }
 .hidden { display: none !important; }
@@ -85,12 +82,6 @@ tr.sel{background:var(--panel2)}
 .palette .pc.w{color:var(--text)}.edrow{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px}
 .edrow select{width:auto;display:inline-block}.edrow label{display:inline-flex;gap:4px;align-items:center;margin-right:6px}.edrow input{width:auto}
 
-/* board colors (class-based: CSS variables in SVG attributes don't apply) */
-#board .sl{fill:#ebecd0}#board .sd{fill:#739552}#board .hl{fill:rgba(255,235,59,.5)}
-#board .cl{fill:#ebecd0}#board .cd{fill:#739552}
-#board .pc{font-family:"Segoe UI Symbol","Noto Sans Symbols 2","DejaVu Sans",serif}
-#board .pw{fill:#fff;stroke:#111;stroke-width:.5;paint-order:stroke}
-#board .pb{fill:#161616;stroke:#e9e9e9;stroke-width:.3;paint-order:stroke}
 /* status bar + options */
 #statusbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);font-weight:600;font-size:14px}
@@ -125,3 +116,43 @@ tr.sel{background:var(--panel2)}
 #save-card>summary{cursor:pointer;list-style:none;color:var(--text)}
 #save-card>summary::-webkit-details-marker{display:none}
 #save-card>summary::before{content:"▸ ";color:var(--muted)}#save-card[open]>summary::before{content:"▾ "}
+
+/* ===== Theme: dark, green accent (matches the reference) ===== */
+:root{--bg:#0b0f11;--panel:#10161a;--panel2:#172025;--line:#27333a;--text:#e8eef0;--muted:#8695a0;
+  --accent:#5fd18b;--good:#5fd18b;--bad:#ef6b6b;--draw:#d9b44a}
+body{font-family:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;letter-spacing:-.005em;
+  background:radial-gradient(1200px 700px at 70% -10%,#13201f 0%,var(--bg) 60%)}
+header{background:transparent;border-bottom:1px solid var(--line)}
+.brand{font-weight:800;font-size:18px}
+nav button.active{background:var(--panel2);color:var(--accent)}
+.card,.tile{background:var(--panel);border:1px solid var(--line);border-radius:16px}
+.label,.rec-head,.candhead{letter-spacing:.08em}
+button,.btn{border-radius:12px;background:var(--panel);border-color:var(--line)}
+button:hover,.btn:hover{border-color:var(--accent);background:var(--panel2)}
+button.primary{background:#3d8f63;border-color:#3d8f63;color:#fff}
+button.primary:hover{background:#47a073;border-color:#47a073}
+input,select,textarea{background:#0c1215;border-radius:12px}
+input:focus,select:focus,textarea:focus{outline-color:var(--accent)}
+.seg button.active,.palette button.active{background:#3d8f63;border-color:#3d8f63;color:#fff}
+.movelist .m.cur{background:rgba(95,209,139,.16);color:var(--accent);outline:1px solid rgba(95,209,139,.45)}
+.chip{background:var(--panel)}
+#evalbar .evtrack{background:#0c1215}
+/* best move box, as in the reference */
+.rec #best-move{color:var(--accent);text-align:center;font-size:42px;border:1px solid var(--line);border-bottom:0;
+  border-radius:14px 14px 0 0;padding:16px 10px 2px;background:#0c1215;min-height:0}
+#best-desc{text-align:center;border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;padding:0 10px 14px;
+  margin:0 0 12px;background:#0c1215;color:var(--text)}
+#best-eval{margin-bottom:6px}
+/* board */
+#board{aspect-ratio:1}
+#board svg{border-radius:0}
+#board .bframe{fill:#0b1013;stroke:#27333a;stroke-width:.4}
+#board .sl{fill:#1b2329}#board .sd{fill:#11181d}
+#board .hl{fill:rgba(61,150,100,.38);stroke:rgba(95,209,139,.7);stroke-width:.3}
+#board .sel{fill:rgba(95,209,139,.35);stroke:#5fd18b;stroke-width:.4}
+#board .dot-legal{fill:rgba(95,209,139,.6)}
+#board .coord{fill:#8695a0;font-size:2.6px;font-family:Inter,"Segoe UI",sans-serif;font-weight:500}
+/* pieces: me = cream, opponent = dark steel (always, whichever color each really is) */
+#board .pm,.palette img.pm{filter:drop-shadow(0 .3px .4px rgba(0,0,0,.6))}
+#board .po,.palette img.po{filter:brightness(.5) sepia(.55) hue-rotate(168deg) saturate(1.1) contrast(1.15) drop-shadow(0 .3px .4px rgba(0,0,0,.6))}
+.palette button.pc{padding:2px 4px;min-width:46px}.palette img{width:34px;height:34px;display:block}

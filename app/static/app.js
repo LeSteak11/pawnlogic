@@ -42,41 +42,46 @@ const sqName = (f, r) => "abcdefgh"[f] + (r + 1);
 
 /* ---------- board ---------- */
 let selected = null;
-function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null } = {}) {
+const PIECE_FILE = { k: "K", q: "Q", r: "R", b: "B", n: "N", p: "P" };
+// "me" is the side drawn as cream pieces; the other side is always the dark steel set.
+function boardSvg(fen, { flip = false, last = null, selected = null, legal = [], arrow = null, me = "white" } = {}) {
   const grid = parseFen(fen);
-  let svg = `<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#4c9a2a"/></marker></defs>`;
+  let svg = `<svg viewBox="-4 0 84 84" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" markerWidth="4" markerHeight="4" refX="2.2" refY="2" orient="auto"><path d="M0,0 L4,2 L0,4 z" fill="#5fd18b"/></marker></defs>`;
   const pos = (f, r) => (flip ? [(7 - f) * 10, r * 10] : [f * 10, (7 - r) * 10]);
+  svg += `<rect x="0" y="0" width="80" height="80" rx="2" class="bframe"/>`;
   for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
     const [x, y] = pos(f, r), name = sqName(f, r), dark = (f + r) % 2 === 0;
     svg += `<rect x="${x}" y="${y}" width="10" height="10" class="${dark ? "sd" : "sl"}" data-sq="${name}"/>`;
-    if (last && (last.slice(0, 2) === name || last.slice(2, 4) === name)) svg += `<rect x="${x}" y="${y}" width="10" height="10" class="hl" pointer-events="none"/>`;
-    if (selected === name) svg += `<rect x="${x}" y="${y}" width="10" height="10" fill="rgba(106,167,255,.55)" pointer-events="none"/>`;
+    if (last && (last.slice(0, 2) === name || last.slice(2, 4) === name)) svg += `<rect x="${x + .4}" y="${y + .4}" width="9.2" height="9.2" rx="1" class="hl" pointer-events="none"/>`;
+    if (selected === name) svg += `<rect x="${x + .4}" y="${y + .4}" width="9.2" height="9.2" rx="1" class="sel" pointer-events="none"/>`;
     const p = grid[7 - r][f];
     if (p) {
-      const white = p === p.toUpperCase();
-      svg += `<text x="${x + 5}" y="${y + 7.9}" font-size="9" text-anchor="middle" pointer-events="none" class="pc ${white ? "pw" : "pb"}">${GLYPH[p.toLowerCase()]}\uFE0E</text>`;
+      const white = p === p.toUpperCase(), mine = (white ? "white" : "black") === me;
+      svg += `<image href="/static/pieces/w${PIECE_FILE[p.toLowerCase()]}.svg" x="${x + .35}" y="${y + .35}" width="9.3" height="9.3" class="${mine ? "pm" : "po"}" pointer-events="none"/>`;
     }
-    if (f === (flip ? 7 : 0)) svg += `<text x="${x + .6}" y="${y + 2.6}" font-size="2.2" class="${dark ? "cl" : "cd"}" pointer-events="none">${r + 1}</text>`;
-    if (r === (flip ? 7 : 0)) svg += `<text x="${x + 9.4}" y="${y + 9.4}" font-size="2.2" text-anchor="end" class="${dark ? "cl" : "cd"}" pointer-events="none">${"abcdefgh"[f]}</text>`;
+  }
+  for (let i = 0; i < 8; i++) {
+    svg += `<text x="${i * 10 + 5}" y="83" text-anchor="middle" class="coord" pointer-events="none">${"abcdefgh"[flip ? 7 - i : i]}</text>`;
+    svg += `<text x="-2" y="${i * 10 + 6.2}" text-anchor="middle" class="coord" pointer-events="none">${flip ? i + 1 : 8 - i}</text>`;
   }
   if (selected) for (const u of legal) if (u.startsWith(selected)) {
     const [x, y] = pos("abcdefgh".indexOf(u[2]), +u[3] - 1);
-    svg += `<circle cx="${x + 5}" cy="${y + 5}" r="1.7" fill="rgba(40,40,40,.45)" pointer-events="none"/>`;
+    svg += `<circle cx="${x + 5}" cy="${y + 5}" r="1.7" class="dot-legal" pointer-events="none"/>`;
   }
   if (arrow) {
     const [x1, y1] = pos("abcdefgh".indexOf(arrow[0]), +arrow[1] - 1), [x2, y2] = pos("abcdefgh".indexOf(arrow[2]), +arrow[3] - 1);
-    svg += `<line x1="${x1 + 5}" y1="${y1 + 5}" x2="${x2 + 5}" y2="${y2 + 5}" stroke="#4c9a2a" stroke-opacity=".8" stroke-width="1.4" marker-end="url(#ah)" pointer-events="none"/>`;
+    svg += `<line x1="${x1 + 5}" y1="${y1 + 5}" x2="${x2 + 5}" y2="${y2 + 5}" stroke="#5fd18b" stroke-opacity=".85" stroke-width="1.3" marker-end="url(#ah)" pointer-events="none"/>`;
   }
   return svg + "</svg>";
 }
 function drawBoard() {
   if (E.on) {
-    $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
+    $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", me: S.orient, selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
     return;
   }
   const best = S.analysis && S.analysis.fen === curFen() && S.analysis.candidates && S.analysis.candidates[0];
   $("#board").innerHTML = boardSvg(curFen(), {
-    flip: S.orient === "black", last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
+    flip: S.orient === "black", me: S.orient, last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
     legal: S.st ? S.st.legal : [], arrow: best ? best.uci : null,
   });
 }
@@ -99,10 +104,12 @@ function gridFen() {
   return `${place} ${E.turn} ${c || "-"} - 0 1`;
 }
 function buildPalette() {
-  const btn = (tool, label, cls) => `<button data-tool="${tool}" class="${cls || ""}" title="${tool}">${label}</button>`;
-  $("#ed-palette").innerHTML = btn("move", "✥ Move", "tl") + btn("x", "✖ Erase", "tl") +
-    Object.keys(OUTLINE).map((k) => btn(k, OUTLINE[k] + "︎", "pc w")).join("") +
-    Object.keys(OUTLINE).map((k) => btn(k.toLowerCase(), GLYPH[k.toLowerCase()] + "︎", "pc b")).join("");
+  const btn = (tool, inner, cls, title) => `<button data-tool="${tool}" class="${cls || ""}" title="${title || tool}">${inner}</button>`;
+  const row = (own) => Object.keys(OUTLINE).map((k) => {
+    const white = (S.orient === "white") === own;
+    return btn(white ? k : k.toLowerCase(), `<img src="/static/pieces/w${k}.svg" class="${own ? "pm" : "po"}" alt="${k}">`, "pc", `${own ? "Your" : "Opponent's"} ${PIECE_NAMES[k.toLowerCase()]}`);
+  }).join("");
+  $("#ed-palette").innerHTML = btn("move", "✥ Move", "tl") + btn("x", "✖ Erase", "tl") + row(true) + row(false);
   markTool();
 }
 function markTool() { document.querySelectorAll("#ed-palette button").forEach((b) => b.classList.toggle("active", b.dataset.tool === E.tool)); }
