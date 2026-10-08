@@ -25,7 +25,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 /* ---------- game state ---------- */
 const S = {
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
-  gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
+  pick: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
 const fenAt = (i) => (i === 0 ? S.startFen : S.plies[i - 1].fen);
 const curFen = () => fenAt(S.cursor);
@@ -80,7 +80,7 @@ function drawBoard() {
     $("#board").innerHTML = boardSvg(gridFen(), { flip: S.orient === "black", me: S.orient, selected: E.sel ? sqName(E.sel[0], 7 - E.sel[1]) : null });
     return;
   }
-  const best = S.analysis && S.analysis.fen === curFen() && S.analysis.candidates && S.analysis.candidates[0];
+  const best = pickedCand();
   $("#board").innerHTML = boardSvg(curFen(), {
     flip: S.orient === "black", me: S.orient, last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
     legal: S.st ? S.st.legal : [], arrow: best ? best.uci : null,
@@ -170,7 +170,7 @@ $("#board").addEventListener("click", (e) => {
 
 /* ---------- position / render ---------- */
 async function refresh(now = false) {
-  selected = null;
+  selected = null; S.pick = 0;
   S.st = await api("/api/state", { fen: curFen() });
   drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
   analyse(now);
@@ -197,29 +197,32 @@ function renderRecHead() {
   else t = $("#only-mine").checked ? "Opponent's turn" : "Best move for your opponent";
   $("#rec-head").textContent = t; $("#rec-head").className = "rec-head " + c;
 }
-function renderMoves() {
+function renderMoves() { drawMoveList(); persistDraft(); scheduleAutosave(); }
+function drawMoveList() {
   const el = $("#movelist"), n = S.plies.length;
   const mv = Math.ceil(n / 2);
   $("#moves-count").textContent = n ? `· ${mv} move${mv === 1 ? "" : "s"}` : "";
   $("#moves-note").textContent = n && S.cursor < n ? `Viewing move ${Math.ceil(S.cursor / 2) || 0} of ${Math.ceil(n / 2)}. Press End (or ⏭) to return to the latest position.` : "";
   if (!n) {
     el.className = "movelist empty"; el.innerHTML = "No moves yet. They appear here as the game is played.";
-    persistDraft(); return;
+    renderAccuracy([]); renderLastGrade(); return;
   }
   el.className = "movelist";
   const first = S.startFen.split(" ")[1] === "b" ? 1 : 0, startNo = +S.startFen.split(" ")[5] || 1;
   const you = S.viewing ? "" : S.orient;
   let h = `<div></div><div class="mh">White${you === "white" ? " (you)" : ""}</div><div class="mh">Black${you === "black" ? " (you)" : ""}</div>`;
   if (first) h += `<div class="n">${startNo}.</div><div class="m skip">…</div>`;
+  const grades = S.plies.map((_, i) => gradePly(i + 1));
   S.plies.forEach((p, i) => {
     const idx = i + first, white = idx % 2 === 0;
     if (white) h += `<div class="n">${startNo + idx / 2}.</div>`;
     const who = you ? ((white ? "white" : "black") === you ? " mine" : " opp") : "";
-    h += `<div class="m${who}${S.cursor === i + 1 ? " cur" : ""}${i === n - 1 ? " last" : ""}" data-i="${i + 1}">${esc(p.san)}</div>`;
+    const g = grades[i];
+    h += `<div class="m${who}${S.cursor === i + 1 ? " cur" : ""}${i === n - 1 ? " last" : ""}" data-i="${i + 1}"${g ? ` title="${g.grade} (−${g.loss.toFixed(1)}%)"` : ""}>${esc(p.san)}${g ? `<i class="gd ${gcls(g.grade)}"></i>` : ""}</div>`;
   });
   el.innerHTML = h;
   const cur = el.querySelector(".cur"); if (cur) cur.scrollIntoView({ block: "nearest" });
-  persistDraft(); scheduleAutosave();
+  renderAccuracy(grades); renderLastGrade(grades);
 }
 $("#movelist").addEventListener("click", (e) => { if (e.target.dataset.i) go(+e.target.dataset.i); });
 
@@ -234,7 +237,9 @@ $("#nav-next").onclick = () => go(S.cursor + 1);
 $("#nav-end").onclick = () => go(S.plies.length);
 document.addEventListener("keydown", (e) => {
   if (e.target.matches("input, textarea, select") || $("#tab-analyze").classList.contains("hidden")) return;
-  if (e.key === "ArrowLeft") go(S.cursor - 1);
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); cyclePick(e.key === "ArrowDown" ? 1 : -1); }
+  else if (e.key === "Enter" && !e.target.matches("button, summary, a")) { const c = pickedCand(); if (c) playText(c.uci); }
+  else if (e.key === "ArrowLeft") go(S.cursor - 1);
   else if (e.key === "ArrowRight") go(S.cursor + 1);
   else if (e.key === "Home") go(0);
   else if (e.key === "End") go(S.plies.length);
@@ -271,13 +276,17 @@ $("#move-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const inp = $("#move-input"), t = inp.value.trim(); inp.value = "";
   if (t) playText(t);
-  else { const b = bestCand(); if (b) playText(b.uci); else toast("No recommendation yet."); }
+  else { const b = pickedCand(); if (b) playText(b.uci); else toast("No recommendation yet."); }
 });
-$("#move-input").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; e.target.blur(); } });
+$("#move-input").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.target.value = ""; e.target.blur(); }
+  else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.value) { e.preventDefault(); cyclePick(e.key === "ArrowDown" ? 1 : -1); }
+});
 
 /* ---------- analysis ---------- */
 let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
+const pickedCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[S.pick] || S.analysis.candidates[0] : null);
 function analyse(now = false) {
   if (E.on) return;
   clearTimeout(aTimer);
@@ -301,7 +310,8 @@ function analyse(now = false) {
         if (fen !== curFen()) return;
         if (d.superseded) { if (tries < 3) continue; throw new Error("Engine busy — try again"); } // cancelled by another request: ask again
         S.analysis = { ...d, fen, secs: (performance.now() - t0) / 1000 };
-        renderAnalysis(false); drawBoard();
+        if (d.candidates && d.candidates.length) EV.set(fen, d.candidates);
+        renderAnalysis(false); drawBoard(); drawMoveList();
         return;
       }
     } catch (err) {
@@ -342,10 +352,65 @@ function moveDesc(c) {
   if (c.san.includes("#")) extra += ", checkmate"; else if (c.san.includes("+")) extra += ", check";
   return `${PIECE_NAMES[pc.toLowerCase()]} ${from} → ${to}${extra}`;
 }
+/* ---------- win chance, move grades, accuracy (all from analysis we already have; no extra engine work) ---------- */
+const EV = new Map(); // fen -> engine candidates, so played moves can be graded
+const winPct = (score, side) => (isMate(score) ? (cpFor(score, side) > 0 ? 100 : 0) : 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cpFor(score, side))) - 1));
+const gradeOf = (loss) => (loss <= 0.5 ? "Best" : loss < 2 ? "Excellent" : loss < 5 ? "Good" : loss < 10 ? "Inaccuracy" : loss < 15 ? "Mistake" : "Blunder");
+const gcls = (g) => "g-" + g.toLowerCase();
+const sideOf = (fen) => (fen.split(" ")[1] === "w" ? "white" : "black");
+function winColor(p) { // muted red -> amber -> green
+  const stops = [[0, [216, 112, 106]], [35, [216, 112, 106]], [50, [199, 166, 86]], [65, [91, 182, 131]], [100, [91, 182, 131]]];
+  let i = 1; while (i < stops.length - 1 && p > stops[i][0]) i++;
+  const [p0, c0] = stops[i - 1], [p1, c1] = stops[i], t = p1 === p0 ? 0 : Math.min(1, Math.max(0, (p - p0) / (p1 - p0)));
+  return `rgb(${c0.map((v, k) => Math.round(v + (c1[k] - v) * t)).join(",")})`;
+}
+function gradePly(i) { // i = 1-based ply; null when the position before it was never analysed
+  const before = EV.get(fenAt(i - 1)), ply = S.plies[i - 1];
+  if (!before || !ply) return null;
+  const mover = sideOf(fenAt(i - 1)), best = winPct(before[0].score, mover);
+  let after = before.find((c) => c.uci === ply.uci), win;
+  if (after) win = winPct(after.score, mover);
+  else if ((after = EV.get(fenAt(i)))) win = winPct(after[0].score, mover);
+  else if (i < S.plies.length && (after = EV.get(fenAt(i + 1)))) win = winPct(after[0].score, mover); // after their reply: close enough
+  else return null;
+  const loss = Math.max(0, best - win);
+  return { mover, loss, grade: ply.uci === before[0].uci ? "Best" : gradeOf(loss) };
+}
+function renderAccuracy(grades) {
+  const acc = { white: [], black: [] };
+  grades.forEach((g) => g && acc[g.mover].push(Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * g.loss) - 3.1669))));
+  const avg = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) + "%" : "—");
+  const you = S.viewing ? null : S.orient, other = you === "white" ? "black" : "white";
+  $("#acc").textContent = !acc.white.length && !acc.black.length ? "" : you
+    ? `Accuracy · you ${avg(acc[you])} · opp ${avg(acc[other])}` : `Accuracy · White ${avg(acc.white)} · Black ${avg(acc.black)}`;
+}
+function renderLastGrade(grades) {
+  const el = $("#last-grade"), g = grades && S.cursor ? grades[S.cursor - 1] : null;
+  if (!g) { el.innerHTML = ""; return; }
+  const who = S.viewing ? cap(g.mover) + "'s" : g.mover === S.orient ? "Your" : "Opponent's";
+  el.innerHTML = `${who} last move: <b class="${gcls(g.grade)}">${g.grade}</b>${g.loss >= 0.5 ? ` (−${g.loss.toFixed(g.loss < 10 ? 1 : 0)}%)` : ""}`;
+}
+function renderWin(score) {
+  $("#winbox").classList.toggle("stale", !score);
+  if (!score) return;
+  const side = pov(), p = winPct(score, side), col = winColor(p);
+  $("#win-pct").textContent = isMate(score) ? `Mate in ${mateIn(score)}` : Math.round(p) + "%";
+  $("#win-pct").style.color = col;
+  $("#win-label").textContent = isMate(score) ? (p > 50 ? (S.viewing ? `for ${cap(side)}` : "for you") : (S.viewing ? `against ${cap(side)}` : "against you"))
+    : S.viewing ? `win chance (${cap(side)})` : "win chance (you)";
+  $("#win-fill").style.width = p + "%"; $("#win-fill").style.background = col;
+  $("#evalfill").style.height = p + "%";
+}
+function cyclePick(d) {
+  const a = S.analysis;
+  if (!a || a.fen !== curFen() || !a.candidates || a.candidates.length < 2) return;
+  S.pick = (S.pick + d + a.candidates.length) % a.candidates.length;
+  renderAnalysis(false); drawBoard();
+}
 function clearRec(big, sub) {
   $("#best-move").textContent = big; $("#best-desc").textContent = sub || "";
   $("#best-eval").textContent = ""; $("#best-eval").className = ""; $("#best-info").textContent = "";
-  $("#cands").innerHTML = ""; $("#evalfill").style.height = "50%";
+  $("#cands").innerHTML = ""; renderWin(null);
 }
 function renderAnalysis(busy) {
   const a = S.analysis, ok = a && a.fen === curFen() && a.candidates;
@@ -353,15 +418,24 @@ function renderAnalysis(busy) {
   if (busy && !ok) return clearRec("…", "Calculating");
   if (!ok) return;
   if (!a.candidates.length) return clearRec("—", S.st.over ? "The game is over." : "No legal move.");
-  const b = a.candidates[0];
-  $("#best-move").textContent = b.san; $("#best-desc").textContent = moveDesc(b);
-  $("#best-eval").textContent = `${evalText(b.score)}  ${evalWords(b.score)}`; $("#best-eval").className = "evtag " + tone(b.score);
+  const mover = S.st.turn, cands = a.candidates, top = winPct(cands[0].score, mover);
+  const info = cands.map((c, i) => { const w = winPct(c.score, mover), loss = Math.max(0, top - w); return { c, w, loss, grade: i === 0 ? "Best" : gradeOf(loss) }; });
+  if (S.pick >= cands.length) S.pick = 0;
+  const p = cands[S.pick], only = info.length > 1 && info[1].loss >= 10;
+  $("#best-move").textContent = p.san; $("#best-desc").textContent = moveDesc(p);
+  $("#best-eval").textContent = `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score);
   $("#best-info").textContent = `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side`;
-  $("#evalfill").style.height = 100 / (1 + Math.exp(-cpFor(b.score, pov()) / 400)) + "%";
-  $("#cands").innerHTML = `<div class="candhead">Top moves <span>click one to play it</span></div>` + a.candidates.map((c, i) =>
-    `<div class="cand" data-uci="${c.uci}"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b><span class="sc ${tone(c.score)}">${evalText(c.score)}</span><span class="pv">${esc(c.pv.slice(1, 6).join(" "))}</span></div>`).join("");
+  renderWin(cands[0].score);
+  $("#cands").innerHTML = `<div class="candhead">Move options <span>↑ ↓ to switch · Enter to play</span></div>` + info.map(({ c, w, grade }, i) => `
+    <div class="cand${i === S.pick ? " on" : ""}" data-i="${i}">
+      <div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b>${i === 0 ? `<span class="tag rec-tag">Recommended</span>` : ""}${i === 0 && only ? `<span class="tag only-tag">Only move</span>` : ""}
+        <span class="spacer"></span><span class="grade ${gcls(grade)}">${grade}</span><span class="cw">${Math.round(w)}%</span></div>
+      <div class="cbar"><i style="width:${w}%;background:${winColor(w)}"></i></div>
+      <div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc(c.pv.slice(1, 4).join(" "))}</span></div>
+    </div>`).join("");
 }
-$("#cands").addEventListener("click", (e) => { const c = e.target.closest(".cand"); if (c) playText(c.dataset.uci); });
+$("#cands").addEventListener("click", (e) => { const c = e.target.closest(".cand"); if (c) { S.pick = +c.dataset.i; renderAnalysis(false); drawBoard(); } });
+$("#cands").addEventListener("dblclick", (e) => { const c = e.target.closest(".cand"), m = pickedCand(); if (c && m) playText(m.uci); });
 
 /* ---------- import ---------- */
 $("#btn-import").onclick = async () => {

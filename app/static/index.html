@@ -6,7 +6,7 @@
 <title>Chess Lab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <header>
@@ -62,6 +62,11 @@
     </div>
     <div class="right">
       <div class="card rec">
+        <div id="winbox" class="winbox stale">
+          <div class="winrow"><span id="win-pct" class="winpct">—</span><span id="win-label" class="muted">win chance</span></div>
+          <div class="wintrack"><div id="win-fill"></div></div>
+          <div id="last-grade" class="lastgrade muted"></div>
+        </div>
         <div id="rec-head" class="rec-head"></div>
         <div id="best-move">—</div>
         <div id="best-desc" class="muted"></div>
@@ -70,7 +75,7 @@
         <div id="cands"></div>
       </div>
       <div class="card">
-        <div class="label">Moves <span id="moves-count"></span></div>
+        <div class="label">Moves <span id="moves-count"></span><span id="acc" class="acc"></span></div>
         <div id="movelist" class="movelist"></div>
         <div id="moves-note" class="muted tiny"></div>
       </div>
@@ -156,6 +161,6 @@
   </form>
 </dialog>
 <div id="toast"></div>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>
