@@ -330,10 +330,6 @@ _sync_reconnect = 0  # bumped by the UI; the extension notices and re-injects it
 _PLACEMENT = re.compile(r"^[pnbrqkPNBRQK1-8/]{15,71}$")
 
 
-def _secs(v):
-    return float(v) if isinstance(v, (int, float)) and 0 <= v < 100000 else None
-
-
 def _pick_source():
     """Follow the game tab you touched last (focused it or a move happened there); drop silent tabs."""
     now = time.time()
@@ -347,7 +343,6 @@ def _pick_source():
         _sync.update(seq=_sync["seq"] + 1, placement=s["placement"], flipped=s["flipped"], source=key, site=s["site"])
         _sync_cv.notify_all()
     _sync["opponent"] = s.get("opponent") or ""
-    _sync["my_clock"], _sync["opp_clock"] = s.get("my_clock"), s.get("opp_clock")
 
 
 @app.post("/api/sync")
@@ -361,8 +356,7 @@ def sync_post(body: dict = Body(...)):
         s = _sources.setdefault(key, {"placement": None, "flipped": False, "active_at": 0.0})
         changed = pl != s["placement"] or fl != s["flipped"]
         s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now,
-                 opponent=str(body.get("opponent") or s.get("opponent") or "")[:60],
-                 my_clock=_secs(body.get("my_clock")), opp_clock=_secs(body.get("opp_clock")))
+                 opponent=str(body.get("opponent") or s.get("opponent") or "")[:60])
         if changed or body.get("focused"):
             s["active_at"] = now
         _sync["at"] = now
@@ -395,7 +389,7 @@ def sync_reconnect():
         _sync_reconnect += 1
         _sources.clear()
         _sync.update(seq=_sync["seq"] + 1, placement=None, flipped=False, at=0.0,
-                     source=None, site=None, opponent="", my_clock=None, opp_clock=None)
+                     source=None, site=None, opponent="")
         _sync_cv.notify_all()
         return {"ok": True, "recal": _sync_reconnect}
 

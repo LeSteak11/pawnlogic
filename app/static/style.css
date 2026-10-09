@@ -268,7 +268,6 @@ main{max-width:1640px}
 .winrow{height:36px;white-space:nowrap;overflow:hidden}
 .lastgrade{height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rec-head{height:18px;line-height:18px;white-space:nowrap;overflow:hidden}
-#clock-warn{position:absolute;right:16px;top:96px;margin:0;line-height:18px}
 .rec #best-move,body.blitz .rec #best-move{height:70px;line-height:52px;white-space:nowrap;overflow:hidden}
 #best-desc{height:48px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 #best-eval{min-height:30px;height:30px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}

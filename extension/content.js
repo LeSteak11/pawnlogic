@@ -94,33 +94,17 @@ function readLichess() {
   return placement && { placement, flipped: black, opponent: top.textContent.trim().replace(/\s+/g, " ").slice(0, 60) };
 }
 
-// Clocks: bottom = your side, top = the opponent. Seconds, or null when the game has no clock.
-function clockSecs(el) {
-  const m = el && el.textContent.trim().match(/^(?:(\d+):)?(\d+):(\d+)(?:[.,](\d))?$/);
-  return m ? (+m[1] || 0) * 3600 + +m[2] * 60 + +m[3] + (m[4] ? +m[4] / 10 : 0) : null;
-}
-function readClocks() {
-  const q = (s) => document.querySelector(s);
-  // whose clock is running = whose turn it is ("me" = bottom side)
-  const turn = IS_LICHESS
-    ? (q(".rclock-bottom.running") ? "me" : q(".rclock-top.running") ? "opp" : null)
-    : (q(".clock-bottom.clock-player-turn") ? "me" : q(".clock-top.clock-player-turn") ? "opp" : null);
-  return IS_LICHESS
-    ? { my_clock: clockSecs(q(".rclock-bottom .time")), opp_clock: clockSecs(q(".rclock-top .time")), turn }
-    : { my_clock: clockSecs(q(".clock-bottom .clock-time-monospace, .clock-bottom")), opp_clock: clockSecs(q(".clock-top .clock-time-monospace, .clock-top")), turn };
-}
-
 const readBoard = IS_LICHESS ? readLichess : readChesscom;
 const SITE = IS_LICHESS ? "lichess" : "chess.com";
-let last = "", lastClock = "", lastSent = 0, timer = null;
+let last = "", lastSent = 0, timer = null;
 function push(force, focused = false) {
   const s = readBoard();
   if (!s) return;
-  const key = s.placement + s.flipped, clk = readClocks(), ck = clk.my_clock + "|" + clk.opp_clock;
-  if (key === last && !force && !(ck !== lastClock && Date.now() - lastSent > 900)) return; // clocks: about once a second
-  last = key; lastClock = ck; lastSent = Date.now();
+  const key = s.placement + s.flipped;
+  if (key === last && !force) return;
+  last = key; lastSent = Date.now();
   if (!alive()) return stop(); // extension was reloaded: this copy retires (a fresh one gets injected)
-  try { chrome.runtime.sendMessage({ ...s, ...clk, site: SITE, focused }); } catch { stop(); }
+  try { chrome.runtime.sendMessage({ ...s, site: SITE, focused }); } catch { stop(); }
 }
 // Read soon after the board changes, but never let a busy page (clocks, animations) starve the read.
 const mo = new MutationObserver(() => { if (!timer) timer = setTimeout(() => { timer = null; push(false); }, 60); });

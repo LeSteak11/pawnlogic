@@ -172,7 +172,7 @@ $("#board").addEventListener("click", (e) => {
 async function refresh(now = false) {
   selected = null; S.pick = -1;
   S.st = await api("/api/state", { fen: curFen() });
-  drawBoard(); renderStatus(); renderMoves(); updateSaveForm(); renderClockWarn();
+  drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
   analyse(now);
 }
 const cap = (w) => w[0].toUpperCase() + w.slice(1);
@@ -892,7 +892,7 @@ async function syncTick(d) {
   syncBusy = true;
   try {
     d = d || await api("/api/sync");
-    syncLast = d; renderSyncChip(d); updateClock(d);
+    syncLast = d; renderSyncChip(d);
     if (d.connected) hadSyncConnection = true;
     else if ($("#sync-on").checked && hadSyncConnection && !reconnecting) {
       // Chess.com may replace its game page between bot games. Recover once
@@ -916,8 +916,6 @@ async function syncTick(d) {
     farSince = null; syncSeq = d.seq;
     if (d.site) S.live = { site: d.site, opponent: d.opponent || S.live.opponent };
     if (r.mode === "append") {
-      const lastP = r.plies[r.plies.length - 1], mover = sideOf(lastP.fen) === "white" ? "black" : "white";
-      lastP.clk = mover === S.orient ? d.my_clock : d.opp_clock; // time left after that move (saved as [%clk])
       S.plies = S.plies.concat(r.plies); S.cursor = S.plies.length; S.viewing = null; renderBanner(); refresh(true);
     } else if (r.mode === "reset") {
       S.orient = syncColor(d); $("#f-color").value = S.orient; newGame(r.fen);
@@ -1014,35 +1012,8 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
   paint();
 })();
 
-/* ---------- clocks, blitz mode, strength ---------- */
-const CLK = { my: null, opp: null, at: 0 };
-let autoBlitzGame = -1;
-const fmtClock = (t) => { t = Math.max(0, t); const m = Math.floor(t / 60), sec = t - m * 60; return t < 20 ? `${m}:${sec.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.floor(sec)).padStart(2, "0")}`; };
-const clockLive = () => !S.viewing && CLK.my != null && Date.now() - CLK.at < 5000;
-function thinkMs() { // full search normally; quicker in blitz and when your clock is low
-  const my = clockLive() ? CLK.my : null;
-  if (my != null && my < 10) return 150;
-  if (my != null && my < 30) return 300;
-  return PREF.blitz ? 500 : undefined;
-}
-function updateClock(d) {
-  CLK.my = d.my_clock ?? null; CLK.opp = d.opp_clock ?? null; CLK.at = Date.now();
-  const chip = $("#clock-chip"), on = d.connected && CLK.my != null;
-  chip.classList.toggle("hidden", !on || !!S.viewing);
-  if (on) {
-    chip.textContent = `⏱ You ${fmtClock(CLK.my)} · Opp ${CLK.opp != null ? fmtClock(CLK.opp) : "—"}`;
-    chip.classList.toggle("low", CLK.my < 15);
-    // short time control at the start of a game: switch blitz on once (you can switch it off again)
-    if (!PREF.blitz && CLK.my <= 300 && S.plies.length <= 2 && autoBlitzGame !== gameNo) { autoBlitzGame = gameNo; setBlitz(true); toast("⚡ Blitz mode on (short clock). Tap ⚡ Blitz to turn it off."); }
-  }
-  renderClockWarn();
-}
-function renderClockWarn() {
-  const el = $("#clock-warn"), mine = S.st && !S.viewing && S.st.turn === S.orient && !S.st.over;
-  const low = clockLive() && mine && CLK.my < 15;
-  el.classList.toggle("hidden", !low);
-  if (low) el.textContent = `⏱ ${Math.ceil(CLK.my)}s left: play fast`;
-}
+/* ---------- blitz mode, strength ---------- */
+function thinkMs() { return PREF.blitz ? 500 : undefined; }
 function blitzFx() { // switch-on moment: gold flash over the whole screen + a short gold confetti burst
   if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const f = $("#gold-flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
@@ -1059,7 +1030,7 @@ function setBlitz(on) {
   $("#blitz-btn").classList.toggle("on", on); $("#blitz-btn").setAttribute("aria-pressed", on);
   if (S.st) { S.pick = -1; S.analysis = null; analyse(true); }
 }
-$("#blitz-btn").onclick = () => { autoBlitzGame = gameNo; setBlitz(!PREF.blitz); };
+$("#blitz-btn").onclick = () => setBlitz(!PREF.blitz);
 document.body.classList.toggle("blitz", PREF.blitz); $("#blitz-btn").classList.toggle("on", PREF.blitz);
 (function initLevel() {
   const r = $("#level"), paint = () => { $("#level-name").textContent = LEVELS[PREF.level].name; r.classList.toggle("weak", PREF.level > 0); };
