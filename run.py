@@ -105,14 +105,21 @@ def main():
 
 
 if __name__ == "__main__":
-    log = (LOG_DIR / "server.log").open("a", buffering=1, encoding="utf-8")
-    if sys.stdout is None or sys.stderr is None:
-        sys.stdout = sys.stderr = log
-    try:
-        main()
-    except Exception as error:
-        import traceback
-        traceback.print_exc(file=log)
-        if "--no-window" not in sys.argv and os.name == "nt":
-            ctypes.windll.user32.MessageBoxW(0, f"{error}\n\nDetails: {LOG_DIR / 'server.log'}", "Chess Lab could not start", 0x10)
-        sys.exit(1)
+    if "--maia3-uci" in sys.argv:
+        # The same entry point works from source and from the frozen Windows app,
+        # giving python-chess a separate official Maia-3 UCI process to manage.
+        from maia3.uci import main as maia3_main
+        sys.argv = ["maia3-uci", *sys.argv[sys.argv.index("--maia3-uci") + 1:]]
+        maia3_main()
+    else:
+        log = (LOG_DIR / "server.log").open("a", buffering=1, encoding="utf-8")
+        if sys.stdout is None or sys.stderr is None:
+            sys.stdout = sys.stderr = log
+        try:
+            main()
+        except Exception as error:
+            import traceback
+            traceback.print_exc(file=log)
+            if "--no-window" not in sys.argv and os.name == "nt":
+                ctypes.windll.user32.MessageBoxW(0, f"{error}\n\nDetails: {LOG_DIR / 'server.log'}", "Chess Lab could not start", 0x10)
+            sys.exit(1)

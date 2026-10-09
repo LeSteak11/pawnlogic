@@ -17,7 +17,7 @@ function Invoke-Checked([string]$Executable, [string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw "$Executable failed with exit code $LASTEXITCODE" }
 }
 Invoke-Checked $python @('-m','pip','install','-r','requirements-build.txt')
-Invoke-Checked $python @('-m','compileall','-q','app','run.py')
+Invoke-Checked $python @('-m','compileall','-q','app','run.py','maia3_uci.py')
 foreach ($script in @('app/static/app.js','extension/content.js','extension/background.js')) {
   Invoke-Checked 'node' @('--check', $script)
 }

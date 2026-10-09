@@ -314,7 +314,7 @@ function analyse(now = false) {
   aTimer = setTimeout(async () => {
     const fen = curFen(), ctl = aborter = new AbortController();
     const t0 = performance.now();
-    const watchdog = setTimeout(() => ctl.abort("timeout"), 10000); // never sit on "Calculating"
+    const watchdog = setTimeout(() => ctl.abort("timeout"), 120000); // first Maia model download/load can take a while
     try {
       for (let tries = 0; ; tries++) {
         const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen, multipv: wantsMore() ? 5 : undefined, time_ms: thinkMs() }), signal: ctl.signal });
@@ -323,7 +323,7 @@ function analyse(now = false) {
         if (fen !== curFen()) return;
         if (d.superseded) { if (tries < 3) continue; throw new Error("Engine busy — try again"); } // cancelled by another request: ask again
         S.analysis = { ...d, fen, secs: (performance.now() - t0) / 1000 };
-        if (d.candidates && d.candidates.length) EV.set(fen, d.candidates);
+        if (d.engine === "stockfish" && d.candidates && d.candidates.length) EV.set(fen, d.candidates);
         renderAnalysis(false); drawBoard(); drawMoveList();
         return;
       }
@@ -550,8 +550,10 @@ function renderAnalysis(busy) {
   const book = bookInfo();
   if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", "Calculating") : undefined; }
   if (ok && !a.candidates.length) { S.opts = null; return clearRec("—", S.st.over ? "The game is over." : "No legal move."); }
-  const mover = S.st.turn, cands = ok ? a.candidates : [], top = cands.length ? winPct(cands[0].score, mover) : null;
-  let info = cands.map((c, i) => { const w = winPct(c.score, mover), loss = Math.max(0, top - w); return { c, w, loss, grade: i === 0 ? "Best" : gradeOf(loss) }; });
+  const human = ok && a.engine === "maia3", mover = S.st.turn, cands = ok ? a.candidates : [];
+  const chances = cands.map((c) => winPct(c.score, mover));
+  const top = chances.length ? (human ? Math.max(...chances) : chances[0]) : null;
+  let info = cands.map((c, i) => { const w = chances[i], loss = Math.max(0, top - w); return { c, w, loss, grade: human ? null : (i === 0 ? "Best" : gradeOf(loss)) }; });
   let rec = stylePick(info, curFen(), mover);
   if (book && book.uci) { // your opening: the book move leads, graded by the engine when it's one of its options
     const at = info.findIndex((o) => o.c.uci === book.uci);
@@ -561,19 +563,19 @@ function renderAnalysis(busy) {
   }
   S.opts = info; S.optsFen = curFen(); S.recIdx = rec.idx;
   const pick = S.pick >= 0 && S.pick < info.length ? S.pick : rec.idx, p = info[pick].c;
-  const only = info.length > 1 && cands.length > 1 && winPct(cands[0].score, mover) - winPct(cands[1].score, mover) >= 10;
+  const only = !human && info.length > 1 && cands.length > 1 && winPct(cands[0].score, mover) - winPct(cands[1].score, mover) >= 10;
   $("#cands").classList.remove("stale");
   setText($("#best-move"), p.san);
   $("#best-desc").textContent = moveDesc(p) + (pick === rec.idx && rec.why ? ` · ${rec.why}` : "");
-  if (p.score) { $("#best-eval").textContent = `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score); }
+  if (p.score) { $("#best-eval").textContent = human ? `Human-game outcome estimate · ${Math.round(winPct(p.score, mover))}%` : `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score); }
   else { $("#best-eval").textContent = "Book move · engine still thinking"; $("#best-eval").className = "evtag even"; }
-  $("#best-info").textContent = ok ? `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side` : "";
+  $("#best-info").textContent = ok ? (human ? `Maia-3 ${String(a.model || "5m").toUpperCase()} · modeled Elo ${a.elo} · ${a.secs.toFixed(1)}s` : `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side`) : "";
   renderWin(cands.length ? cands[0].score : null);
   const left = book && book.left ? `Left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "balanced" ? ` + ${STYLES[effStyle()]}` : ""} from here` : "";
   $("#cands").innerHTML = candHead(left) + info.map((o, i) => {
     const { c, w, grade } = o, engineTop = !o.book && c === cands[0];
     const tags = (i === rec.idx ? `<span class="tag rec-tag">Recommended</span>` : "") + (o.book ? `<span class="tag book-tag">Book</span>` : "")
-      + (engineTop && i !== rec.idx ? `<span class="tag eng-tag">Engine #1</span>` : "") + (engineTop && only ? `<span class="tag only-tag">Only move</span>` : "");
+      + (engineTop && i !== rec.idx ? `<span class="tag eng-tag">${human ? "Most human" : "Engine #1"}</span>` : "") + (engineTop && only ? `<span class="tag only-tag">Only move</span>` : "");
     return `<div class="cand${i === pick ? " on" : ""}" data-i="${i}">
       <div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b>${tags}
         <span class="spacer"></span>${grade ? `<span class="grade ${gcls(grade)}">${grade}</span>` : ""}<span class="cw">${w == null ? "…" : Math.round(w) + "%"}</span></div>

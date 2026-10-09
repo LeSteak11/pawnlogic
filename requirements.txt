@@ -1,3 +1,4 @@
 fastapi==0.142.4
 uvicorn==0.54.0
 chess==1.11.2
+maia3 @ https://github.com/CSSLab/maia3/archive/1e13597c42d4858b7cfd7cfdae01e297263364b2.zip

@@ -21,13 +21,36 @@ from .experiments import elo_estimate, label_for, runner, sanitize
 
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Chess Lab")
-engine = ENGINES[load_config()["engine"]]()
+_engine = None
+_engine_name = None
+_engine_lock = threading.Lock()
 _last_ping = time.time()
 IDLE_EXIT_SECONDS = 300  # exit when the UI window has been gone this long
 
 
 def bad(msg):
     raise HTTPException(400, msg)
+
+
+def active_engine(cfg):
+    global _engine, _engine_name
+    name = cfg.get("engine", "maia3")
+    if name not in ENGINES:
+        raise RuntimeError(f"Unknown engine: {name}")
+    with _engine_lock:
+        if _engine is None or name != _engine_name:
+            if _engine is not None:
+                _engine.close()
+            _engine, _engine_name = ENGINES[name](), name
+        return _engine
+
+
+def close_engine():
+    global _engine, _engine_name
+    with _engine_lock:
+        if _engine is not None:
+            _engine.close()
+        _engine = _engine_name = None
 
 
 def make_board(fen: str) -> chess.Board:
@@ -75,7 +98,7 @@ def shutdown():
     """Used by the launcher to replace an outdated server after an update."""
     if runner.running:
         bad("An experiment is running")
-    threading.Timer(0.3, lambda: (engine.close(), os._exit(0))).start()
+    threading.Timer(0.3, lambda: (close_engine(), os._exit(0))).start()
     return {"ok": True}
 
 
@@ -93,7 +116,10 @@ def get_config():
 
 @app.put("/api/config")
 def put_config(patch: dict = Body(...)):
-    return save_config(patch)
+    try:
+        return save_config(patch)
+    except (TypeError, ValueError) as error:
+        bad(str(error))
 
 
 @app.post("/api/state")
@@ -139,7 +165,7 @@ def analyse(body: dict = Body(...)):
     if isinstance(body.get("time_ms"), int) and 50 <= body["time_ms"] <= 10000:
         cfg["mode"], cfg["time_ms"] = "time", body["time_ms"]  # short on the clock / blitz: answer faster
     try:
-        return engine.analyse(b, cfg)
+        return active_engine(cfg).analyse(b, cfg)
     except Exception as e:  # engine missing/crashed: surface to the UI
         raise HTTPException(500, str(e))
 

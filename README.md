@@ -1,13 +1,13 @@
 # Chess Lab
 
-Local chess laboratory: Stockfish move recommendations, game tracking, history/replay and stats. No cloud, no API keys.
+Local chess laboratory: human-like Maia-3 move recommendations, optional Stockfish analysis, game tracking, history/replay and stats. No API keys.
 
 ## Run
-Packaged Windows releases use `ChessLab-Setup-<version>.exe`. It creates the desktop shortcut, bundles Python and Stockfish, and upgrades in place while preserving games. Build and release instructions: [docs/releases.md](docs/releases.md).
+Packaged Windows releases use `ChessLab-Setup-<version>.exe`. It creates the desktop shortcut, bundles the Maia-3 CPU runtime and Stockfish, and upgrades in place while preserving games. The selected Maia checkpoint downloads once from Hugging Face and is then reused from the user cache. Build and release instructions: [docs/releases.md](docs/releases.md).
 
 For source development, double-click `ChessLab.bat`. A compact Brave app window opens (Edge fallback); the server closes itself a few minutes after the window is closed.
 
-First-time setup: Python 3.11+, then `engine/stockfish.exe` (Stockfish 19 x86-64 from https://stockfishchess.org/download/). The batch file creates `.venv` and installs `requirements.txt` automatically.
+First-time setup: Python 3.11+. The batch file creates `.venv` and installs the Maia-3 CPU runtime automatically. The default 5M model downloads on first use. `engine/stockfish.exe` (Stockfish 19 x86-64 from https://stockfishchess.org/download/) is optional for Stockfish mode and required for experiments.
 
 ## Chess.com workflow (computer-opponent practice only)
 1. Start a bot game on Chess.com, put Chess Lab beside it.
@@ -21,7 +21,7 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 ## Data
 - `%LOCALAPPDATA%\ChessLab\data\games.db` (SQLite) is the source of truth. Existing source-folder data is migrated without deleting the originals. PGN is generated on export.
 - Back up: History tab > *Backup database*. Export all games: *Export all PGN*.
-- `%LOCALAPPDATA%\ChessLab\config.json` stores engine settings (also editable under ⚙ Settings).
+- `%LOCALAPPDATA%\ChessLab\config.json` stores engine settings (also editable under ⚙ Settings). Maia-3 5M at Elo 1500 is the default; 23M/79M and Stockfish remain selectable.
 - Source types: **assisted** (engine used), **independent** (no engine), **experiment** (engine-vs-engine, Phase 2). Stats are never mixed silently: the Dashboard has a filter. Win % = wins / scored games; unfinished games and experiments aren't scored.
 
 ## Auto-sync from Chess.com computer games (optional)
@@ -45,15 +45,16 @@ Experiments tab: name it, set the game count, and configure Engine A and B (time
 
 ## Layout
 ```
-app/        server.py (API), engine.py (Engine interface + Stockfish), experiments.py, db.py, static/ (UI)
+app/        server.py (API), engine.py (Maia-3 + Stockfish), experiments.py, db.py, static/ (UI)
 engine/     stockfish.exe (not in git)
 data/       games.db, exports/
 run.py      launcher        ChessLab.bat   Windows entry point
 ```
-Add another engine: subclass `Engine` in `app/engine.py` and register it in `ENGINES`.
+Maia-3 runs as an official UCI subprocess on CPU. Stockfish remains the engine used by the experiment runner. Add another engine by subclassing `Engine` in `app/engine.py` and registering it in `ENGINES`.
 
 ## Status
 V1 feature-complete: analysis, save, history, dashboard, experiments.
 
 ## Credits
 Chess pieces: "merida" set (white and black) by Armando Hernandez Marroquin, GPLv2+, as distributed with Lichess (github.com/lichess-org/lila, public/piece/merida; licence listed in that repository's COPYING.md). Font: Inter (Google Fonts, loaded online; falls back to Segoe UI offline). Blitz confetti: canvas-confetti v1.9.3 by Kiril Vatev, ISC licence (app/static/vendor/, licence alongside).
+Maia-3 inference code: University of Toronto CSSLab, AGPL-3.0, https://github.com/CSSLab/maia3. Model checkpoints are downloaded from the official UofTCSSLab Hugging Face repositories and are not stored in this repository.

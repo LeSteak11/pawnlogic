@@ -169,6 +169,12 @@
   <form method="dialog" id="settings-form">
     <h3>Engine settings</h3>
     <div class="formgrid">
+      <label>Default engine<select name="engine"><option value="maia3">Maia-3 (human-like)</option><option value="stockfish">Stockfish</option></select></label>
+      <label>Maia model<select name="maia_model"><option value="5m">5M · CPU recommended</option><option value="23m">23M · more accurate</option><option value="79m">79M · slowest</option></select></label>
+      <label>Your Maia Elo<input name="maia_elo" type="number" min="0" max="5000" step="50"></label>
+      <label>Opponent Maia Elo<input name="maia_opponent_elo" type="number" min="0" max="5000" step="50"></label>
+      <label>Human variation<input name="maia_temperature" type="number" min="0" max="5" step="0.05"></label>
+      <label>Move diversity<input name="maia_top_p" type="number" min="0.01" max="1" step="0.01"></label>
       <label>Limit by<select name="mode"><option value="time">Time per move</option><option value="depth">Depth</option></select></label>
       <label>Time (ms)<input name="time_ms" type="number" min="50" step="50"></label>
       <label>Depth<input name="depth" type="number" min="1" max="60"></label>
@@ -184,6 +190,6 @@
 <div id="toast"></div>
 <script src="/static/vendor/confetti.browser.js"></script>
 <script src="/static/openings.js?v=1"></script>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>

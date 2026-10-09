@@ -63,7 +63,12 @@ def main():
     download(f'https://raw.githubusercontent.com/official-stockfish/Stockfish/{tag}/Copying.txt', licenses / 'Stockfish-GPL-3.0.txt')
     (licenses / 'Stockfish-source.txt').write_text(f'{engine_name}\nExact corresponding source: {source_url}\nBinary SHA256: {hashlib.sha256((ROOT / "engine/stockfish.exe").read_bytes()).hexdigest()}\n', encoding='utf-8')
     download('https://raw.githubusercontent.com/niklasf/python-chess/master/LICENSE.txt', licenses / 'python-chess-GPL-3.0.txt')
-    (licenses / 'THIRD-PARTY.txt').write_text('Stockfish and python-chess: GPL-3.0; see bundled licenses and source links.\npython-chess source: https://github.com/niklasf/python-chess\nMerida pieces: Armando Hernandez Marroquin, GPLv2+; https://github.com/lichess-org/lila\nFastAPI and Uvicorn: MIT.\nPyInstaller: GPL with bootloader exception.\nCanvas confetti license is in app/static/vendor.\n', encoding='utf-8')
+    maia_revision = '1e13597c42d4858b7cfd7cfdae01e297263364b2'
+    download(f'https://raw.githubusercontent.com/CSSLab/maia3/{maia_revision}/LICENSE', licenses / 'Maia3-AGPL-3.0.txt')
+    (licenses / 'Maia3-source.txt').write_text(
+        f'Maia-3 inference code\nExact corresponding source: https://github.com/CSSLab/maia3/tree/{maia_revision}\n'
+        'Model checkpoints download separately from https://huggingface.co/collections/MaiaChess/maia3\n', encoding='utf-8')
+    (licenses / 'THIRD-PARTY.txt').write_text('Stockfish and python-chess: GPL-3.0; see bundled licenses and source links.\npython-chess source: https://github.com/niklasf/python-chess\nMaia-3 inference code: AGPL-3.0; see bundled license and exact source link.\nMaia-3 checkpoints download separately from the official UofTCSSLab Hugging Face repositories.\nMerida pieces: Armando Hernandez Marroquin, GPLv2+; https://github.com/lichess-org/lila\nFastAPI and Uvicorn: MIT.\nPyInstaller: GPL with bootloader exception.\nCanvas confetti license is in app/static/vendor.\n', encoding='utf-8')
     print(f'Prepared release {args.version}; extension: {archive}')
 
 
