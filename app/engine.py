@@ -181,7 +181,7 @@ class StockfishEngine(Engine):
                                 break
                         infos = list(an.multipv)
                     break
-                except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
+                except Exception:  # a crashed, wedged or mid-stop engine: restart it and retry once
                     self.close()
                     if attempt:
                         raise

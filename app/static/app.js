@@ -300,7 +300,7 @@ $("#move-input").addEventListener("keydown", (e) => {
 let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
 const pickedCand = () => (S.opts && S.optsFen === curFen() ? (S.opts[S.pick >= 0 && S.pick < S.opts.length ? S.pick : S.recIdx] || S.opts[0]).c : null);
-function analyse(now = false) {
+function analyse(now = false, retry = 0) {
   if (E.on) return;
   clearTimeout(aTimer);
   if (aborter) aborter.abort();
@@ -330,6 +330,9 @@ function analyse(now = false) {
     } catch (err) {
       if (ctl.signal.reason === "timeout" && fen === curFen()) return analyse(true); // stuck request: start over
       if (err.name === "AbortError") return;
+      // A failure right after the opponent's reply is usually transient (engine busy with the
+      // previous position or restarting); retry automatically instead of needing a page refresh.
+      if (fen === curFen() && retry < 4) { aTimer = setTimeout(() => analyse(true, retry + 1), 600 * (retry + 1)); return; }
       $("#best-move").textContent = "Engine error"; $("#best-info").textContent = err.message;
     } finally { clearTimeout(watchdog); }
   }, now ? 0 : 120); // the short wait only batches quick arrow-key stepping
