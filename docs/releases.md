@@ -18,6 +18,23 @@ Outputs in `dist`: `ChessLab/ChessLab.exe`, `ChessLab-Setup-<version>.exe`, `Che
 
 The build downloads Stockfish's license using the version reported by the actual binary and records a link to that exact source tag and the binary's SHA256. It refuses an unrecognized engine version. The bundled `licenses` directory includes third-party notices.
 
+## macOS (Intel) build
+
+GitHub Actions builds the Mac release (`.github/workflows/mac-release.yml`) on the `macos-15-intel` runner. Pushing a tag such as `v1.6.0` builds, tests, smoke-tests and attaches `ChessLab-1.6.0-mac-intel.dmg`, the extension ZIP and `SHA256SUMS-1.6.0-mac.txt` to that GitHub Release. *Actions > macOS (Intel) release > Run workflow* builds without releasing; the DMG is then a downloadable workflow artifact. The Windows installer is still built locally with `build-release.ps1` and can be uploaded to the same release.
+
+To build on a Mac locally:
+
+```bash
+scripts/build-release-mac.sh --version 1.6.0
+```
+
+Add `--install` to copy the app to `~/Applications`. Prerequisites: `.venv` from Python 3.10-3.12 with `requirements-mac-intel.txt`, Node.js, and the Xcode command line tools. `engine/stockfish` is built automatically from the official `sf_19` source tag by `scripts/build-stockfish-mac.sh` if it is missing. The official macOS Stockfish download cannot be bundled: its x86_64 slice reads the network from the arm64 slice, and PyInstaller's thinning and re-signing breaks it.
+
+Intel-Mac notes:
+- PyTorch's last x86_64 macOS wheels are 2.2.2, and Maia-3 imports `torch.nn.RMSNorm` from torch 2.4. `app/torch_compat.py` adds an identical `RMSNorm` only when torch lacks it, so Windows is unaffected.
+- The app is ad-hoc signed only. Developer ID signing and notarization need a paid Apple Developer account; add `codesign`/`notarytool` steps to the workflow once one exists.
+- Mac data paths: `~/Library/Application Support/ChessLab/` (`data/games.db`, `config.json`, `logs/`, `exports/`).
+
 ## Persistent data and migration
 
 Games: `%LOCALAPPDATA%\ChessLab\data\games.db`.

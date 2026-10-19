@@ -1,0 +1,5 @@
+# Intel Macs: PyTorch's last x86_64 macOS wheels are 2.2.2 (Python 3.10-3.12),
+# built against NumPy 1.x.
+-r requirements.txt
+torch==2.2.2
+numpy<2

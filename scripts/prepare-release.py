@@ -4,12 +4,14 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 import urllib.request
 import zipfile
 from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
+STOCKFISH = ROOT / ('engine/stockfish.exe' if sys.platform == 'win32' else 'engine/stockfish')
 
 
 def download(url, target):
@@ -51,7 +53,7 @@ def main():
             z.write(icon, 'icons/' + icon.name)
     licenses = build / 'licenses'
     licenses.mkdir(exist_ok=True)
-    result = subprocess.run([str(ROOT / 'engine/stockfish.exe')], input='uci\nquit\n',
+    result = subprocess.run([str(STOCKFISH)], input='uci\nquit\n',
         capture_output=True, text=True, timeout=15)
     identity = re.search(r'^id name (.+)$', result.stdout, re.M)
     engine_name = identity[1].strip() if identity else ''
@@ -61,7 +63,7 @@ def main():
     tag = f'sf_{match[1]}'
     source_url = f'https://github.com/official-stockfish/Stockfish/tree/{tag}'
     download(f'https://raw.githubusercontent.com/official-stockfish/Stockfish/{tag}/Copying.txt', licenses / 'Stockfish-GPL-3.0.txt')
-    (licenses / 'Stockfish-source.txt').write_text(f'{engine_name}\nExact corresponding source: {source_url}\nBinary SHA256: {hashlib.sha256((ROOT / "engine/stockfish.exe").read_bytes()).hexdigest()}\n', encoding='utf-8')
+    (licenses / 'Stockfish-source.txt').write_text(f'{engine_name}\nExact corresponding source: {source_url}\nBinary SHA256: {hashlib.sha256(STOCKFISH.read_bytes()).hexdigest()}\n', encoding='utf-8')
     download('https://raw.githubusercontent.com/niklasf/python-chess/master/LICENSE.txt', licenses / 'python-chess-GPL-3.0.txt')
     maia_revision = '1e13597c42d4858b7cfd7cfdae01e297263364b2'
     download(f'https://raw.githubusercontent.com/CSSLab/maia3/{maia_revision}/LICENSE', licenses / 'Maia3-AGPL-3.0.txt')

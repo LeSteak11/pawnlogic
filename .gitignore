@@ -12,3 +12,4 @@ build/
 dist/
 .tools/
 release.json
+engine/stockfish

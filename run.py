@@ -27,6 +27,9 @@ def server_info():
 
 
 def open_window():
+    if sys.platform == "darwin":
+        open_mac_window()
+        return
     candidates = [Path(os.environ.get(base, "")) / relative for base, relative in (
         ("PROGRAMFILES", "BraveSoftware/Brave-Browser/Application/brave.exe"),
         ("LOCALAPPDATA", "BraveSoftware/Brave-Browser/Application/brave.exe"),
@@ -39,6 +42,27 @@ def open_window():
             return
     import webbrowser
     webbrowser.open(URL)
+
+
+def open_mac_window():
+    for app_name in ("Brave Browser", "Google Chrome", "Microsoft Edge"):
+        for folder in (Path("/Applications"), Path.home() / "Applications"):
+            executable = folder / f"{app_name}.app/Contents/MacOS/{app_name}"
+            if executable.is_file():
+                # `open -na` hands the app window to the running browser instead of
+                # tying a browser process to this launcher.
+                subprocess.Popen(["open", "-na", str(executable.parents[2]), "--args",
+                                  f"--app={URL}", "--window-size=1000,1000"])
+                return
+    subprocess.Popen(["open", URL])
+
+
+def show_error(message: str):
+    if os.name == "nt":
+        ctypes.windll.user32.MessageBoxW(0, message, "Chess Lab could not start", 0x10)
+    elif sys.platform == "darwin":
+        script = 'display alert "Chess Lab could not start" message (system attribute "CHESSLAB_ERROR") as critical'
+        subprocess.run(["osascript", "-e", script], env={**os.environ, "CHESSLAB_ERROR": message})
 
 
 def stop_server():
@@ -108,6 +132,8 @@ if __name__ == "__main__":
     if "--maia3-uci" in sys.argv:
         # The same entry point works from source and from the frozen Windows app,
         # giving python-chess a separate official Maia-3 UCI process to manage.
+        from app.torch_compat import install as install_torch_compat
+        install_torch_compat()
         from maia3.uci import main as maia3_main
         sys.argv = ["maia3-uci", *sys.argv[sys.argv.index("--maia3-uci") + 1:]]
         maia3_main()
@@ -120,6 +146,6 @@ if __name__ == "__main__":
         except Exception as error:
             import traceback
             traceback.print_exc(file=log)
-            if "--no-window" not in sys.argv and os.name == "nt":
-                ctypes.windll.user32.MessageBoxW(0, f"{error}\n\nDetails: {LOG_DIR / 'server.log'}", "Chess Lab could not start", 0x10)
+            if "--no-window" not in sys.argv:
+                show_error(f"{error}\n\nDetails: {LOG_DIR / 'server.log'}")
             sys.exit(1)

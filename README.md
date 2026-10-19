@@ -9,6 +9,11 @@ For source development, double-click `ChessLab.bat`. A compact Brave app window 
 
 First-time setup: Python 3.11+. The batch file creates `.venv` and installs the Maia-3 CPU runtime automatically. The default 5M model downloads on first use. `engine/stockfish.exe` (Stockfish 19 x86-64 from https://stockfishchess.org/download/) is optional for Stockfish mode and required for experiments.
 
+## Run on macOS (Intel)
+Releases include `ChessLab-<version>-mac-intel.dmg`, built by GitHub Actions. Open it and drag **Chess Lab** into Applications. The app is not signed with an Apple Developer ID, so on first launch right-click it > **Open** (or allow it under System Settings > Privacy & Security). It opens a Brave app window (Chrome/Edge fallback, then the default browser), exactly like the Windows release.
+
+For source development, double-click `ChessLab.command`. It needs Python 3.10-3.12, because PyTorch's last Intel-Mac release (2.2.2) stops at 3.12; it installs `requirements-mac-intel.txt` into `.venv`. For Stockfish mode, run `scripts/build-stockfish-mac.sh` once (needs the Xcode command line tools) to build `engine/stockfish`. Mac data lives in `~/Library/Application Support/ChessLab` instead of `%LOCALAPPDATA%\ChessLab`. The extension loads the same way in Chrome or Brave on the Mac.
+
 ## Chess.com workflow (computer-opponent practice only)
 1. Start a bot game on Chess.com, put Chess Lab beside it.
 2. Type each move (yours and the bot's) in the move box: `Nf3`, `e4`, `O-O`, or `e2e4`. Or click the board.
@@ -48,7 +53,7 @@ Experiments tab: name it, set the game count, and configure Engine A and B (time
 app/        server.py (API), engine.py (Maia-3 + Stockfish), experiments.py, db.py, static/ (UI)
 engine/     stockfish.exe (not in git)
 data/       games.db, exports/
-run.py      launcher        ChessLab.bat   Windows entry point
+run.py      launcher        ChessLab.bat   Windows entry point   ChessLab.command   macOS entry point
 ```
 Maia-3 runs as an official UCI subprocess on CPU. Stockfish remains the engine used by the experiment runner. Add another engine by subclassing `Engine` in `app/engine.py` and registering it in `ENGINES`.
 

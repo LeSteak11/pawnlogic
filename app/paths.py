@@ -8,7 +8,11 @@ from pathlib import Path
 
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
-USER_ROOT = Path(os.environ.get("CHESSLAB_DATA_DIR") or Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local/share")) / "ChessLab")
+if sys.platform == "darwin":
+    DEFAULT_USER_BASE = Path.home() / "Library/Application Support"
+else:
+    DEFAULT_USER_BASE = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local/share"))
+USER_ROOT = Path(os.environ.get("CHESSLAB_DATA_DIR") or DEFAULT_USER_BASE / "ChessLab")
 DB_PATH = USER_ROOT / "data" / "games.db"
 CONFIG_PATH = USER_ROOT / "config.json"
 LOG_DIR = USER_ROOT / "logs"

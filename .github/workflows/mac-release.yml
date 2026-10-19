@@ -1,0 +1,86 @@
+name: macOS (Intel) release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (MAJOR.MINOR.PATCH); defaults to VERSION"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      CHESSLAB_DATA_DIR: ${{ github.workspace }}/.ci-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # PyTorch's last Intel-Mac wheels (2.2.2) support Python 3.10-3.12.
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then v="${{ inputs.version }}"
+          else v="$(tr -d '[:space:]' < VERSION)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Stockfish build
+        uses: actions/cache@v4
+        with:
+          path: engine/stockfish
+          key: stockfish-sf_19-x86-64-avx2-${{ runner.os }}
+
+      - name: Build Stockfish
+        run: '[ -x engine/stockfish ] || scripts/build-stockfish-mac.sh'
+
+      - name: Create environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements-mac-intel.txt -r requirements-build.txt
+
+      - name: Test and build
+        run: scripts/build-release-mac.sh --version "${{ steps.version.outputs.version }}"
+
+      - name: Smoke test bundled app
+        run: |
+          app="dist/Chess Lab.app/Contents/MacOS/ChessLab"
+          "$app" --no-window --port 18765 &
+          for _ in $(seq 60); do curl -sf http://127.0.0.1:18765/api/version && break; sleep 1; done
+          curl -sf -o /dev/null http://127.0.0.1:18765/
+          curl -sf -X PUT -H 'content-type: application/json' -d '{"engine":"stockfish"}' http://127.0.0.1:18765/api/config >/dev/null
+          curl -sf -X POST -H 'content-type: application/json' \
+            -d '{"fen":"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"}' \
+            http://127.0.0.1:18765/api/analyse | grep -q '"candidates"'
+          "$app" --stop --port 18765
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChessLab-${{ steps.version.outputs.version }}-mac-intel
+          path: |
+            dist/*.dmg
+            dist/ChessLab-Sync-*.zip
+            dist/SHA256SUMS-*-mac.txt
+
+      - name: Attach to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/ChessLab-Sync-*.zip
+            dist/SHA256SUMS-*-mac.txt

@@ -11,6 +11,9 @@ import chess.engine
 
 from .paths import CONFIG_PATH, RESOURCE_ROOT, SOURCE_ROOT
 
+EXE_SUFFIX = ".exe" if os.name == "nt" else ""
+SETUP_HINT = "ChessLab.bat" if os.name == "nt" else "ChessLab.command"
+
 DEFAULT_CONFIG = {
     "config_version": 2,
     "engine": "maia3",
@@ -19,7 +22,7 @@ DEFAULT_CONFIG = {
     "maia_opponent_elo": 1500,
     "maia_temperature": 0.2,
     "maia_top_p": 0.95,
-    "path": "engine/stockfish.exe",
+    "path": f"engine/stockfish{EXE_SUFFIX}",
     "mode": "time",       # "time" (ms per move) or "depth"
     "time_ms": 1000,
     "depth": 18,
@@ -96,7 +99,7 @@ def engine_path(cfg: dict) -> Path:
 def open_uci(cfg: dict) -> "chess.engine.SimpleEngine":
     path = engine_path(cfg)
     if not path.exists():
-        raise RuntimeError(f"Stockfish not found at {path}. Put stockfish.exe in the engine/ folder.")
+        raise RuntimeError(f"Stockfish not found at {path}. Put stockfish{EXE_SUFFIX} in the engine/ folder.")
     proc = chess.engine.SimpleEngine.popen_uci(str(path), creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     proc.configure({k: v for k, v in uci_options(cfg).items() if k in proc.options})
     return proc
@@ -208,7 +211,7 @@ class StockfishEngine(Engine):
 
 def maia_command(cfg: dict) -> list[str]:
     if getattr(sys, "frozen", False):
-        launcher = [str(Path(sys.executable).with_name("Maia3UCI.exe"))]
+        launcher = [str(Path(sys.executable).with_name(f"Maia3UCI{EXE_SUFFIX}"))]
     else:
         launcher = [sys.executable, str(SOURCE_ROOT / "run.py"), "--maia3-uci"]
     launcher.extend(["--model", f"maia3-{cfg.get('maia_model', '5m')}",
@@ -242,7 +245,7 @@ class Maia3Engine(StockfishEngine):
                 timeout=120,
             )
         except (FileNotFoundError, chess.engine.EngineError) as error:
-            raise RuntimeError("Maia-3 is not installed. Re-run ChessLab.bat to install its CPU runtime.") from error
+            raise RuntimeError(f"Maia-3 is not installed. Re-run {SETUP_HINT} to install its CPU runtime.") from error
         self.proc.configure({k: v for k, v in options.items() if k in self.proc.options})
         self.opts_key = key
 
