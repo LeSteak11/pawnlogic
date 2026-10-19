@@ -109,6 +109,18 @@ def main():
         if not args.no_window:
             open_window()
         return
+    if sys.platform == "darwin" and getattr(sys, "frozen", False) and not args.no_window:
+        # Finder only re-activates a running .app instead of launching it again, so the
+        # bundle's own process must not be the long-lived service: start the service
+        # detached, open the window and exit, so every double-click opens a window.
+        subprocess.Popen([sys.executable, "--no-window", "--port", str(PORT)], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(600):
+            if server_info():
+                open_window()
+                return
+            time.sleep(0.1)
+        raise RuntimeError("Chess Lab's service did not start")
     os.chdir(RESOURCE_ROOT)
     import socket
     with socket.socket() as probe:
