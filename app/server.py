@@ -194,7 +194,8 @@ def analyse(body: dict = Body(...)):
     if body.get('context') == 'puzzle':
         # Puzzle search is independent of the saved game strength and effort.
         cfg.update(engine='stockfish', skill_level=20, elo=None, stockfish_variety='best',
-                   mode='time', time_ms=10000, multipv=1, continuation_moves=6)
+                   mode='time', time_ms=10000 if body.get('puzzle_search') == 'deep' else 2000,
+                   multipv=1, continuation_moves=6)
     try:
         result = copy.deepcopy(active_engine(cfg).analyse(b, cfg))
         if cfg.get("engine") == "maia3" and cfg.get("hybrid_guard") and result.get("candidates"):

@@ -5,6 +5,21 @@ from app import server
 
 
 class PuzzleSyncTests(unittest.TestCase):
+    def test_puzzle_search_budgets_preserve_full_strength(self):
+        for search, milliseconds in [(None, 2000), ('quick', 2000), ('deep', 10000)]:
+            with self.subTest(search=search), patch.object(server, 'load_config', return_value={
+                'engine': 'maia3', 'skill_level': 3, 'elo': 1500
+            }), patch.object(server, 'active_engine') as engine:
+                engine.return_value.analyse.return_value = {'candidates': []}
+                server.analyse({'fen': chess.STARTING_FEN, 'context': 'puzzle',
+                                'effort': 'fast', 'puzzle_search': search})
+                cfg = engine.call_args.args[0]
+                self.assertEqual(cfg['time_ms'], milliseconds)
+                self.assertEqual(cfg['engine'], 'stockfish')
+                self.assertEqual(cfg['skill_level'], 20)
+                self.assertIsNone(cfg['elo'])
+                self.assertEqual(cfg['multipv'], 1)
+
     def test_puzzle_source_is_separate_from_game(self):
         import time
         now = time.time()

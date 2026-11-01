@@ -24,7 +24,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 /* ---------- game state ---------- */
 const S = {
-  puzzle: false, puzzleReady: false, puzzleKey: '', puzzlePlacement: null, epoch: 0,
+  puzzle: false, puzzleReady: false, puzzleKey: '', puzzlePlacement: null, puzzleSearch: 'quick', epoch: 0,
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
   pick: -1, opts: null, optsFen: null, recIdx: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
@@ -327,6 +327,7 @@ function analyse(now = false) {
         const history_fens = Array.from({ length: S.cursor + 1 }, (_, i) => fenAt(i));
         const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           fen, context: S.puzzle ? 'puzzle' : 'game', effort: S.puzzle ? 'deep' : PREF.blitz ? "fast" : PREF.effort, history_fens,
+          puzzle_search: S.puzzle ? S.puzzleSearch : undefined,
         }), signal: ctl.signal });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail);
@@ -623,7 +624,7 @@ function renderAnalysis(busy) {
   const a = S.analysis, ok = a && a.fen === curFen() && a.candidates;
   renderRecHead();
   const book = S.puzzle ? null : bookInfo();
-  if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", "Calculating") : undefined; }
+  if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", S.puzzle ? (S.puzzleSearch === 'deep' ? 'Deeper analysis · 10-second search' : 'Analyzing · 2-second search') : "Calculating") : undefined; }
   if (ok && !a.candidates.length) { S.opts = null; return clearRec("—", S.st.over ? "The game is over." : "No legal move."); }
   const human = ok && a.engine === "maia3", mover = S.st.turn, cands = ok ? a.candidates : [];
   const chances = cands.map((c) => c.score ? winPct(c.score, mover) : null);
@@ -1080,18 +1081,22 @@ $("#sync-reconnect").onclick = () => requestSyncReconnect(true);
 setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped while reviewing or busy
 
 let savedGameSession = null, puzzlePolling = false;
-$('#puzzle-solve').onclick = async () => {
+async function solvePuzzle(search = 'quick') {
   if (!S.puzzle || !S.puzzlePlacement) return toast('Wait for the puzzle board to connect.', true);
   const turn = $('#puzzle-turn').value;
   clearPuzzleRecommendation('Calculating puzzle move…');
+  S.puzzleSearch = search;
   S.startFen = S.puzzlePlacement + ' ' + turn + ' - - 0 1';
   S.plies = []; S.cursor = 0; S.viewing = null;
   S.orient = turn === 'w' ? 'white' : 'black';
   S.puzzleReady = true;
   try { await refresh(true); }
   catch (err) { clearPuzzleRecommendation('Cannot analyze this position: ' + err.message); }
-};
+}
+$('#puzzle-solve').onclick = () => solvePuzzle('quick');
+$('#puzzle-deep').onclick = () => solvePuzzle('deep');
 function clearPuzzleRecommendation(message) {
+  S.puzzleSearch = 'quick';
   S.epoch++; S.puzzleReady = false; S.analysis = null; S.opts = null;
   clearTimeout(aTimer); if (aborter) aborter.abort();
   clearRec('—', message);

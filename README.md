@@ -26,7 +26,7 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 
 Select **Puzzle** in the Analyze screen and enable Auto-sync. Reload the unpacked extension and refresh the Chess.com rated-puzzle tab after extension updates. Once the board appears, select **Side to move** and click **Analyze this position**. Play the suggested move on Chess.com yourself; request another analysis after its reply.
 
-Puzzle analysis uses full-strength Stockfish with a dedicated ten-second search, independent of game profiles, Elo caps and calculation-effort settings. Puzzle sessions do not enter game history or statistics. A finite search does not guarantee the platform's expected solution.
+Puzzle analysis uses full-strength Stockfish with a two-second default search. Choose **Deeper analysis** for a ten-second search on difficult positions. Both are independent of game profiles, Elo caps and calculation-effort settings. Puzzle sessions do not enter game history or statistics. A finite search does not guarantee the platform's expected solution.
 
 The manual fallback assumes no castling or en-passant rights. Automatic turn and completion detection requires explicit page metadata and is not verified across Chess.com layouts. Reconnect also depends on the extension's configured page access.
 
