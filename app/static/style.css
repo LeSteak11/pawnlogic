@@ -314,3 +314,28 @@ body.puzzle-mode #rec-head,
 body.puzzle-mode #save-card {
   display: none !important;
 }
+body.puzzle-mode #cands .cand {
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 9px;
+  height: auto;
+  min-height: 80px;
+  border: 1px solid var(--puzzle-edge);
+  background: var(--puzzle-fill);
+  color: var(--puzzle-text);
+  box-shadow: none;
+}
+body.puzzle-mode .cand.puzzle-best { --puzzle-fill: #204c35; --puzzle-edge: #4d986b; --puzzle-text: #e0f6e7; }
+body.puzzle-mode .cand.puzzle-maybe { --puzzle-fill: #55451b; --puzzle-edge: #b29445; --puzzle-text: #fff1be; }
+body.puzzle-mode .cand.puzzle-loss { --puzzle-fill: #59282d; --puzzle-edge: #b65a64; --puzzle-text: #ffe1e4; }
+body.puzzle-mode #cands .cand:hover { filter: brightness(1.12); }
+body.puzzle-mode #cands .cand.on { outline: 2px solid var(--puzzle-text); outline-offset: -3px; }
+body.puzzle-mode #cands .cand .rk,
+body.puzzle-mode #cands .cand .cdesc,
+body.puzzle-mode #cands .cand .pv { color: var(--puzzle-text); }
+body.puzzle-mode #cands .cand .cdesc { display: block; opacity: .88; }
+body.puzzle-mode #best-move.puzzle-best { color: #79c995; }
+body.puzzle-mode #best-move.puzzle-maybe { color: #e4c36a; }
+body.puzzle-mode #best-move.puzzle-loss { color: #ff7676; }
+body.puzzle-mode .cand.puzzle-loss .cdesc,
+body.puzzle-mode .cand.puzzle-loss .pv { color: #ff9292; }

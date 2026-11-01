@@ -24,9 +24,13 @@ No scraping, screen-reading or automated input of Chess.com. Don't use engine he
 
 ## Puzzle Mode
 
-Select **Puzzle** in the Analyze screen and enable Auto-sync. Reload the unpacked extension and refresh the Chess.com rated-puzzle tab after extension updates. Once the board appears, select **Side to move** and click **Analyze this position**. Play the suggested move on Chess.com yourself; request another analysis after its reply.
+Choose Stockfish or Maia in the puzzle engine selector. Maia proposes human-like candidates which Stockfish then evaluates; verification and first-time model loading can add latency. Results show at most five ranked moves without percentages. Red means a searched forced mate against the solver, not a prediction of Chess.com's pass/fail decision. Rankings do not certify multiple accepted puzzle solutions.
 
-Puzzle analysis uses full-strength Stockfish with a two-second default search. Choose **Deeper analysis** for a ten-second search on difficult positions. Both are independent of game profiles, Elo caps and calculation-effort settings. Puzzle sessions do not enter game history or statistics. A finite search does not guarantee the platform's expected solution.
+Select **Puzzle** in the Analyze screen and enable Auto-sync. Reload the unpacked extension and refresh the Chess.com rated-puzzle tab after extension updates. **Side to move** defaults to the color at the bottom of the website board, with manual overrides available. Click **Analyze this position** once to start a puzzle. With **Auto-analyze replies** enabled, subsequent legal moves are tracked and a quick search starts after the opponent replies. A new puzzle or unexpected position jump requires a fresh Analyze click. Orientation identifies your side, not the current turn; wait for the introductory move before starting.
+
+Puzzle suggestions use rounded, colored cards: green for the recommended move, yellow for possible alternatives, and red for a forced loss. Ranking expresses engine preference; alternatives may not solve the puzzle.
+
+Stockfish puzzle analysis uses full strength with a two-second default search. Choose **Deeper analysis** for a ten-second search on difficult positions. These search budgets also apply to Stockfish's evaluation of Maia candidates, with Maia inference adding overhead. Puzzle search controls are independent of game profiles and calculation-effort settings. Puzzle sessions do not enter game history or statistics. A finite search does not guarantee the platform's expected solution.
 
 The manual fallback assumes no castling or en-passant rights. Automatic turn and completion detection requires explicit page metadata and is not verified across Chess.com layouts. Reconnect also depends on the extension's configured page access.
 

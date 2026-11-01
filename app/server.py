@@ -168,6 +168,30 @@ def move(body: dict = Body(...)):
     return entry(b, mv)
 
 
+def rank_puzzle_candidates(board, result):
+    """Rank searched evaluations; Maia's outcome estimates are not tactical proof."""
+    sign = 1 if board.turn == chess.WHITE else -1
+    def score(candidate):
+        return candidate.get('quality_score') if result.get('engine') == 'maia3' else candidate.get('score')
+    def order(candidate):
+        value = score(candidate)
+        if not value:
+            return float('-inf')
+        mate = value.get('mate')
+        if mate is not None:
+            relative = mate * sign
+            return 100000 - abs(mate) if relative > 0 else -100000 + abs(mate)
+        return sign * value.get('cp', 0)
+    candidates = sorted(result.get('candidates', []), key=order, reverse=True)[:5]
+    for i, candidate in enumerate(candidates):
+        value = score(candidate)
+        candidate['puzzle_rank'] = i + 1
+        candidate['puzzle_verified'] = value is not None
+        candidate['puzzle_forced_loss'] = bool(value and value.get('mate') is not None and value['mate'] * sign < 0)
+    result['candidates'] = candidates
+    result['recommended_uci'] = candidates[0]['uci'] if candidates else None
+
+
 @app.post("/api/analyse")
 def analyse(body: dict = Body(...)):
     b = make_board(body["fen"])
@@ -193,9 +217,10 @@ def analyse(body: dict = Body(...)):
         cfg["mode"], cfg["time_ms"] = "time", milliseconds
     if body.get('context') == 'puzzle':
         # Puzzle search is independent of the saved game strength and effort.
-        cfg.update(engine='stockfish', skill_level=20, elo=None, stockfish_variety='best',
+        cfg.update(engine='maia3' if body.get('puzzle_engine') == 'maia3' else 'stockfish',
+                   skill_level=20, elo=None, stockfish_variety='best', hybrid_guard=True,
                    mode='time', time_ms=10000 if body.get('puzzle_search') == 'deep' else 2000,
-                   multipv=1, continuation_moves=6)
+                   multipv=5, continuation_moves=6)
     try:
         result = copy.deepcopy(active_engine(cfg).analyse(b, cfg))
         if cfg.get("engine") == "maia3" and cfg.get("hybrid_guard") and result.get("candidates"):
@@ -205,6 +230,8 @@ def analyse(body: dict = Body(...)):
             except (OSError, RuntimeError, chess.engine.EngineError):
                 result["guard"] = "unavailable"
 
+        if body.get('context') == 'puzzle':
+            rank_puzzle_candidates(b, result)
         history = body.get("history_fens")
         if isinstance(history, list):
             seen = {" ".join(fen.split()[:4]) for fen in history[-200:] if isinstance(fen, str)}

@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=17">
+<link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 <body>
 <div id="gold-flash" aria-hidden="true"></div>
@@ -33,9 +33,11 @@
       <div class="optrow">
         <label>Mode <select id="session-mode"><option value="game">Game</option><option value="puzzle">Puzzle</option></select></label>
         <span id="puzzle-manual" hidden>
-          <label>Side to move <select id="puzzle-turn"><option value="w">White</option><option value="b">Black</option></select></label>
+          <label>Engine <select id="puzzle-engine"><option value="stockfish">Stockfish</option><option value="maia3">Maia · Stockfish checked</option></select></label>
+          <label>Side to move <select id="puzzle-turn"><option value="auto">Auto (board orientation)</option><option value="w">White</option><option value="b">Black</option></select></label>
           <button id="puzzle-solve" type="button">Analyze this position</button>
           <button id="puzzle-deep" type="button">Deeper analysis · 10s</button>
+          <label><input id="puzzle-auto" type="checkbox" checked> Auto-analyze replies</label>
           <small>Without a full FEN, assumes no castling or en passant.</small>
         </span>
         <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess)</label>

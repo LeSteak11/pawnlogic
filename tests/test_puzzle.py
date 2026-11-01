@@ -18,7 +18,24 @@ class PuzzleSyncTests(unittest.TestCase):
                 self.assertEqual(cfg['engine'], 'stockfish')
                 self.assertEqual(cfg['skill_level'], 20)
                 self.assertIsNone(cfg['elo'])
-                self.assertEqual(cfg['multipv'], 1)
+                self.assertEqual(cfg['multipv'], 5)
+
+    def test_rank_black_candidates_and_mark_only_proven_losses(self):
+        board = chess.Board(); board.turn = chess.BLACK
+        result = {'engine': 'stockfish', 'candidates': [
+            {'uci': 'a7a6', 'score': {'cp': 10000, 'mate': 3}},
+            {'uci': 'b7b6', 'score': {'cp': -100, 'mate': None}},
+            {'uci': 'c7c6', 'score': {'cp': 800, 'mate': None}}]}
+        server.rank_puzzle_candidates(board, result)
+        self.assertEqual(result['recommended_uci'], 'b7b6')
+        self.assertEqual([c['puzzle_forced_loss'] for c in result['candidates']], [False, False, True])
+
+    def test_maia_estimates_are_not_proof_and_results_are_capped(self):
+        result = {'engine': 'maia3', 'candidates': [
+            {'uci': str(i), 'score': {'cp': -10000, 'mate': -1}} for i in range(7)]}
+        server.rank_puzzle_candidates(chess.Board(), result)
+        self.assertEqual(len(result['candidates']), 5)
+        self.assertTrue(all(not c['puzzle_verified'] and not c['puzzle_forced_loss'] for c in result['candidates']))
 
     def test_puzzle_source_is_separate_from_game(self):
         import time

@@ -24,7 +24,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 /* ---------- game state ---------- */
 const S = {
-  puzzle: false, puzzleReady: false, puzzleKey: '', puzzlePlacement: null, puzzleSearch: 'quick', epoch: 0,
+  puzzle: false, puzzleReady: false, puzzleKey: '', puzzlePlacement: null, puzzleFlipped: false, puzzleSearch: 'quick', epoch: 0,
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
   pick: -1, opts: null, optsFen: null, recIdx: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
@@ -328,6 +328,7 @@ function analyse(now = false) {
         const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           fen, context: S.puzzle ? 'puzzle' : 'game', effort: S.puzzle ? 'deep' : PREF.blitz ? "fast" : PREF.effort, history_fens,
           puzzle_search: S.puzzle ? S.puzzleSearch : undefined,
+          puzzle_engine: S.puzzle ? $('#puzzle-engine').value : undefined,
         }), signal: ctl.signal });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail);
@@ -626,6 +627,7 @@ function renderAnalysis(busy) {
   const book = S.puzzle ? null : bookInfo();
   if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", S.puzzle ? (S.puzzleSearch === 'deep' ? 'Deeper analysis · 10-second search' : 'Analyzing · 2-second search') : "Calculating") : undefined; }
   if (ok && !a.candidates.length) { S.opts = null; return clearRec("—", S.st.over ? "The game is over." : "No legal move."); }
+  if (S.puzzle && ok) return renderPuzzleOptions(a);
   const human = ok && a.engine === "maia3", mover = S.st.turn, cands = ok ? a.candidates : [];
   const chances = cands.map((c) => c.score ? winPct(c.score, mover) : null);
   const qualityChances = cands.map((c) => (c.quality_score || c.score) ? winPct(c.quality_score || c.score, mover) : null);
@@ -673,6 +675,25 @@ function renderAnalysis(busy) {
         <div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc(c.pv.slice(1).join(" "))}</span></div>
     </div>`;
   }).join("");
+}
+function renderPuzzleOptions(a) {
+  const candidates = a.candidates.slice(0, 5);
+  S.opts = candidates.map(c => ({c})); S.optsFen = curFen(); S.recIdx = 0;
+  const pick = S.pick >= 0 && S.pick < candidates.length ? S.pick : 0;
+  const chosen = candidates[pick];
+  const label = (c, i) => c.puzzle_forced_loss ? 'Avoid · forced loss' : i === 0 ? 'Recommended' : 'Possible alternative';
+  const color = (c, i) => c.puzzle_forced_loss ? 'puzzle-loss' : i === 0 ? 'puzzle-best' : 'puzzle-maybe';
+  const explanation = (c, i) => c.puzzle_forced_loss ? 'The engine finds a forced mate against you.'
+    : i === 0 ? 'The engine’s first choice for this position.' : 'Lower engine preference. May not solve this puzzle.';
+  $('#best-move').textContent = chosen.san;
+  $('#best-desc').textContent = label(chosen, pick) + ' · ' + explanation(chosen, pick);
+  $('#best-move').classList.remove('puzzle-best', 'puzzle-maybe', 'puzzle-loss');
+  $('#best-move').classList.add(color(chosen, pick));
+  $('#best-eval').textContent = ''; $('#best-eval').className = '';
+  $('#best-info').textContent = `${a.engine === 'maia3' ? 'Maia' : 'Stockfish'} · ${a.secs.toFixed(1)}s`;
+  $('#cands').classList.remove('stale');
+  $('#cands').innerHTML = '<div class="candhead">Puzzle move suggestions</div><p class="muted tiny">Green: recommended · Yellow: possible alternative · Red: avoid<br>Listed in engine preference order—not a list of correct answers.</p>' + candidates.map((c, i) =>
+    `<div class="cand${i === pick ? ' on' : ''} ${color(c, i)}" data-i="${i}"><div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b><span class="spacer"></span><span>${label(c, i)}</span></div><div class="cdesc">${explanation(c, i)}</div><div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc((c.pv || []).slice(1).join(' '))}</span></div></div>`).join('');
 }
 $("#cands").addEventListener("click", (e) => { const c = e.target.closest(".cand"); if (c) { S.pick = +c.dataset.i; renderAnalysis(false); drawBoard(); } });
 $("#cands").addEventListener("dblclick", (e) => { const c = e.target.closest(".cand"), m = pickedCand(); if (c && m) playText(m.uci); });
@@ -1081,12 +1102,59 @@ $("#sync-reconnect").onclick = () => requestSyncReconnect(true);
 setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped while reviewing or busy
 
 let savedGameSession = null, puzzlePolling = false;
+let puzzleFollowFen = null, puzzleAutoTimer = null;
+$('#puzzle-auto').checked = store.get('cl_puzzle_auto', true);
+$('#puzzle-auto').onchange = () => {
+  store.set('cl_puzzle_auto', $('#puzzle-auto').checked);
+  clearTimeout(puzzleAutoTimer);
+  S.puzzleKey = ''; // reprocess the latest board when enabled
+};
+$('#puzzle-turn').onchange = () => {
+  puzzleFollowFen = null;
+  clearPuzzleRecommendation('Side changed. Analyze once to start following replies.');
+};
+function schedulePuzzleReply() {
+  if (!$('#puzzle-auto').checked || !puzzleFollowFen) return;
+  const placement = S.puzzlePlacement, epoch = S.epoch;
+  puzzleAutoTimer = setTimeout(async () => {
+    try {
+      if (!S.puzzle || epoch !== S.epoch || !$('#sync-on').checked || !$('#puzzle-auto').checked) return;
+      const selected = $('#puzzle-turn').value;
+      const side = selected === 'auto' ? (S.puzzleFlipped ? 'b' : 'w') : selected;
+      const r = await api('/api/sync/apply', {fen: puzzleFollowFen, placement, flipped: side === 'b'});
+      if (!S.puzzle || epoch !== S.epoch || placement !== S.puzzlePlacement || !$('#puzzle-auto').checked) return;
+      if (r.mode === 'append') puzzleFollowFen = r.plies[r.plies.length - 1].fen;
+      else if (r.mode !== 'same') {
+        puzzleFollowFen = null;
+        clearPuzzleRecommendation('New puzzle or position jump. Click Analyze to follow replies.');
+        return;
+      }
+      if (puzzleFollowFen.split(' ')[1] !== side) {
+        clearPuzzleRecommendation('Waiting for the opponent’s reply…');
+        return;
+      }
+      S.startFen = puzzleFollowFen; S.plies = []; S.cursor = 0;
+      S.orient = side === 'w' ? 'white' : 'black';
+      S.puzzleSearch = 'quick'; S.puzzleReady = true;
+      await refresh(true);
+    } catch (err) {
+      if (S.puzzle && epoch === S.epoch) clearPuzzleRecommendation('Auto-analysis paused. Click Analyze to retry.');
+    }
+  }, 800);
+}
+$('#puzzle-engine').value = store.get('cl_puzzle_engine', 'stockfish');
+$('#puzzle-engine').onchange = () => {
+  store.set('cl_puzzle_engine', $('#puzzle-engine').value);
+  if (S.puzzle) clearPuzzleRecommendation('Engine changed. Click Analyze this position.');
+};
 async function solvePuzzle(search = 'quick') {
   if (!S.puzzle || !S.puzzlePlacement) return toast('Wait for the puzzle board to connect.', true);
-  const turn = $('#puzzle-turn').value;
+  const selection = $('#puzzle-turn').value;
+  const turn = selection === 'auto' ? (S.puzzleFlipped ? 'b' : 'w') : selection;
   clearPuzzleRecommendation('Calculating puzzle move…');
   S.puzzleSearch = search;
   S.startFen = S.puzzlePlacement + ' ' + turn + ' - - 0 1';
+  puzzleFollowFen = S.startFen;
   S.plies = []; S.cursor = 0; S.viewing = null;
   S.orient = turn === 'w' ? 'white' : 'black';
   S.puzzleReady = true;
@@ -1096,6 +1164,7 @@ async function solvePuzzle(search = 'quick') {
 $('#puzzle-solve').onclick = () => solvePuzzle('quick');
 $('#puzzle-deep').onclick = () => solvePuzzle('deep');
 function clearPuzzleRecommendation(message) {
+  clearTimeout(puzzleAutoTimer);
   S.puzzleSearch = 'quick';
   S.epoch++; S.puzzleReady = false; S.analysis = null; S.opts = null;
   clearTimeout(aTimer); if (aborter) aborter.abort();
@@ -1105,6 +1174,7 @@ function clearPuzzleRecommendation(message) {
 $('#session-mode').onchange = () => {
   const puzzle = $('#session-mode').value === 'puzzle';
   if (puzzle === S.puzzle) return;
+  puzzleFollowFen = null; clearTimeout(puzzleAutoTimer);
   document.body.classList.toggle('puzzle-mode', puzzle);
   $('#puzzle-manual').hidden = !puzzle;
   for (const selector of ['.stylecard', '#winbox', '#rec-head', '#save-card']) {
@@ -1138,11 +1208,16 @@ setInterval(async () => {
     // Piece placement is sufficient to display the board, but not to search:
     // analysis still requires trustworthy turn and special-move rights.
     S.puzzlePlacement = d.placement;
+    S.puzzleFlipped = !!d.flipped;
+    $('#puzzle-turn').querySelector('option[value="auto"]').textContent = `Auto · ${d.flipped ? 'Black' : 'White'} (board orientation)`;
     S.orient = d.flipped ? 'black' : 'white';
     $('#turn-chip').textContent = 'Puzzle · waiting for turn data';
     drawBoard();
-    if (d.status === 'solved' || d.status === 'failed') return clearPuzzleRecommendation('Puzzle ' + d.status + '.');
-    if (!d.fen || !d.puzzleId || !['white', 'black'].includes(d.solver) || d.status !== 'playing') return;
+    if (d.status === 'solved' || d.status === 'failed') { puzzleFollowFen = null; return clearPuzzleRecommendation('Puzzle ' + d.status + '.'); }
+    if (!d.fen || !d.puzzleId || !['white', 'black'].includes(d.solver) || d.status !== 'playing') {
+      schedulePuzzleReply();
+      return;
+    }
     S.startFen = d.fen; S.plies = []; S.cursor = 0; S.orient = d.solver;
     S.puzzleReady = d.fen.split(' ')[1] === (d.solver === 'white' ? 'w' : 'b');
     await refresh(true);
