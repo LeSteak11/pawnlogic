@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
 <div id="gold-flash" aria-hidden="true"></div>
@@ -31,6 +31,12 @@
       <div id="banner" class="banner hidden"></div>
       <div id="statusbar"><span id="turn-chip" class="chip"></span><span id="sync-chip" class="chip hidden"></span></div>
       <div class="optrow">
+        <label>Mode <select id="session-mode"><option value="game">Game</option><option value="puzzle">Puzzle</option></select></label>
+        <span id="puzzle-manual" hidden>
+          <label>Side to move <select id="puzzle-turn"><option value="w">White</option><option value="b">Black</option></select></label>
+          <button id="puzzle-solve" type="button">Analyze this position</button>
+          <small>Without a full FEN, assumes no castling or en passant.</small>
+        </span>
         <label><input type="checkbox" id="sync-on"> Auto-sync (Chess.com / Lichess)</label>
         <button id="sync-reconnect" class="sync-reconnect" title="Forget the old tab and reconnect to a game on your extension's enabled pages">↻ Reconnect</button>
         <label><input type="checkbox" id="only-mine"> Only recommend on my turn</label>
@@ -67,11 +73,25 @@
     </div>
     <div class="right">
       <div class="card stylecard">
-        <div class="srow"><span class="label">Style</span><div class="seg" id="style-seg"></div>
+        <div class="srow profile-row"><label class="profile-pick"><span class="label">Play profile</span><select id="style-select" aria-label="Play profile"></select></label>
           <button id="blitz-btn" class="blitz-btn" aria-pressed="false" title="Blitz mode: faster answers, simpler moves, compact card">⚡ Blitz</button>
-          <label id="style-cost-wrap" class="costlbl">may cost up to <select id="style-cost"><option value="1">1%</option><option value="3">3%</option><option value="6">6%</option></select></label></div>
-        <div class="srow lvlrow"><span class="label">Strength</span><input id="level" type="range" min="0" max="4" step="1" dir="rtl" aria-label="Recommendation strength">
-          <span id="level-name" class="lvlname">Max</span><span class="muted tiny">grading stays full strength</span></div>
+          <label id="style-cost-wrap" class="costlbl">profile freedom <select id="style-cost"><option value="1">1%</option><option value="3">3%</option><option value="6">6%</option><option value="10">10%</option><option value="15">15%</option></select></label></div>
+        <div id="profile-summary" class="profile-summary muted"></div>
+        <details id="profile-custom" class="profile-custom">
+          <summary><span class="label">More control</span><span class="muted">custom mix and variety</span></summary>
+          <div class="profile-grid">
+            <label>Risk <span id="risk-name"></span><input id="profile-risk" type="range" min="-2" max="2" step="1"></label>
+            <label>Complexity <span id="complexity-name"></span><input id="profile-complexity" type="range" min="-2" max="2" step="1"></label>
+            <label>Initiative <span id="initiative-name"></span><input id="profile-initiative" type="range" min="-2" max="2" step="1"></label>
+            <label>Focus <span id="focus-name"></span><input id="profile-focus" type="range" min="-2" max="2" step="1"></label>
+            <label>Variety <select id="profile-variety"><option value="0">Consistent</option><option value="25">Subtle</option><option value="60">Varied</option><option value="100">Explorer</option></select></label>
+            <button id="profile-reset" type="button" class="ghost">Reset custom mix</button>
+          </div>
+        </details>
+        <div class="srow recommendation-controls">
+          <label><span class="label">Playing strength</span><select id="playing-strength" aria-label="Actual engine playing strength"></select></label>
+          <label><span class="label">Calculation effort</span><select id="calculation-effort"><option value="auto">Auto</option><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="deep">Deep</option><option value="custom">Custom settings</option></select></label>
+        </div>
         <details id="op-card"><summary><span class="label">Openings</span> <span id="op-sum" class="muted"></span></summary>
           <div class="opgrid">
             <label>As White<select id="op-white"></select></label>
@@ -168,28 +188,45 @@
 <dialog id="settings">
   <form method="dialog" id="settings-form">
     <h3>Engine settings</h3>
-    <div class="formgrid">
-      <label>Default engine<select name="engine"><option value="maia3">Maia-3 (human-like)</option><option value="stockfish">Stockfish</option></select></label>
-      <label>Maia model<select name="maia_model"><option value="5m">5M · CPU recommended</option><option value="23m">23M · more accurate</option><option value="79m">79M · slowest</option></select></label>
-      <label>Your Maia Elo<input name="maia_elo" type="number" min="0" max="5000" step="50"></label>
-      <label>Opponent Maia Elo<input name="maia_opponent_elo" type="number" min="0" max="5000" step="50"></label>
-      <label>Human variation<input name="maia_temperature" type="number" min="0" max="5" step="0.05"></label>
-      <label>Move diversity<input name="maia_top_p" type="number" min="0.01" max="1" step="0.01"></label>
-      <label>Limit by<select name="mode"><option value="time">Time per move</option><option value="depth">Depth</option></select></label>
-      <label>Time (ms)<input name="time_ms" type="number" min="50" step="50"></label>
-      <label>Depth<input name="depth" type="number" min="1" max="60"></label>
-      <label>Candidate lines<input name="multipv" type="number" min="1" max="5"></label>
-      <label>Threads<input name="threads" type="number" min="1" max="32"></label>
-      <label>Hash (MB)<input name="hash_mb" type="number" min="16" step="16"></label>
-      <label>Skill level (0–20)<input name="skill_level" type="number" min="0" max="20"></label>
-      <label>Elo limit (blank = full)<input name="elo" type="number" min="1320" max="3190"></label>
+    <div class="formgrid settings-general">
+      <label>Default engine<select name="engine"><option value="maia3">Maia-3 · human-like</option><option value="stockfish">Stockfish 19 · strongest</option></select></label>
+      <label>Move options shown<input name="multipv" type="number" min="1" max="8"></label>
+      <label>Continuation moves shown<input name="continuation_moves" type="number" min="0" max="6"><small>Expected replies displayed after each option.</small></label>
     </div>
+
+    <section class="settings-panel" data-engine-panel="maia3">
+      <div class="settings-title">Maia-3 behavior</div>
+      <div class="formgrid">
+        <label>Model preset<select name="maia_model">
+          <option value="5m">Fast · 5M · best for CPU</option>
+          <option value="23m">Balanced · 23M · more accurate</option>
+          <option value="79m">Highest accuracy · 79M · slowest</option>
+        </select></label>
+        <div id="maia-model-status" class="settings-note wide"></div>
+        <label>Opponent modeled Elo<input name="maia_opponent_elo" type="number" min="0" max="5000" step="1"></label>
+        <label class="check-label"><input name="hybrid_guard" type="checkbox"> Verify Maia choices with local Stockfish</label>
+        <div class="settings-note wide">Playing strength and variety are controlled on the main screen. Stockfish verification adds tactical safety, mate detection and continuation lines without API usage.</div>
+      </div>
+    </section>
+
+    <section class="settings-panel" data-engine-panel="stockfish">
+      <div class="settings-title">Stockfish calculation</div>
+      <div class="formgrid">
+        <label>Calculation budget<select name="mode"><option value="time">Time per move</option><option value="depth">Search depth</option><option value="nodes">Node count</option></select></label>
+        <label data-limit="time">Time per move (ms)<input name="time_ms" type="number" min="50" max="60000" step="1"></label>
+        <label data-limit="depth">Depth<input name="depth" type="number" min="1" max="60"></label>
+        <label data-limit="nodes">Nodes<input name="nodes" type="number" min="1" max="1000000000" step="1"></label>
+        <label>Threads<input name="threads" type="number" min="1" max="32"></label>
+        <label>Hash memory (MB)<input name="hash_mb" type="number" min="16" max="65536" step="1"></label>
+      </div>
+      <div class="settings-note">Choose “Custom settings” for Calculation effort on the main screen to use the exact budget above. Playing strength and recommendation variety stay on the main screen.</div>
+    </section>
     <div class="dlgbtns"><button value="cancel" class="ghost">Cancel</button><button value="ok" class="primary">Save</button></div>
   </form>
 </dialog>
 <div id="toast"></div>
 <script src="/static/vendor/confetti.browser.js"></script>
 <script src="/static/openings.js?v=1"></script>
-<script src="/static/app.js?v=17"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>

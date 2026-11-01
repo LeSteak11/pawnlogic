@@ -64,7 +64,19 @@ function readChesscom() {
   }
   const placement = toPlacement(grid);
   const opp = document.querySelector('.player-top [data-test-element="user-tagline-username"], #board-layout-player-top .user-username-component, .player-top .user-username-component');
-  return placement && { placement, flipped: chesscomFlipped(b), opponent: opp ? opp.textContent.trim().slice(0, 60) : "" };
+  const snapshot = placement && { placement, flipped: chesscomFlipped(b), opponent: opp ? opp.textContent.trim().slice(0, 60) : "" };
+  if (snapshot && /^\/puzzles\/rated\/?$/.test(location.pathname)) {
+    // Only consume explicit DOM metadata. Never infer turn or special-move
+    // rights from orientation, or read a puzzle's hidden solution.
+    const root = document.querySelector('[data-puzzle-id]') || b;
+    const fen = b.getAttribute('fen') || b.getAttribute('data-fen') || root.getAttribute('data-fen');
+    const solver = root.getAttribute('data-player-color');
+    const status = root.getAttribute('data-puzzle-status');
+    Object.assign(snapshot, { kind: 'puzzle', puzzleId: root.getAttribute('data-puzzle-id') || '',
+      fen: fen || null, solver: ['white', 'black'].includes(solver) ? solver : null,
+      status: ['playing', 'solved', 'failed', 'loading'].includes(status) ? status : 'unknown' });
+  }
+  return snapshot;
 }
 
 // Lichess: only games against Stockfish ("Stockfish level N"); pieces are positioned by pixel offsets.
@@ -100,7 +112,7 @@ let last = "", lastSent = 0, timer = null;
 function push(force, focused = false) {
   const s = readBoard();
   if (!s) return;
-  const key = s.placement + s.flipped;
+  const key = JSON.stringify(s);
   if (key === last && !force) return;
   last = key; lastSent = Date.now();
   if (!alive()) return stop(); // extension was reloaded: this copy retires (a fresh one gets injected)

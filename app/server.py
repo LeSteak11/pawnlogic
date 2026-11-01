@@ -1,8 +1,10 @@
 """Chess Lab local server: JSON API + static UI."""
+import copy
 import hashlib
 import io
 import os
 import re
+import secrets
 import tempfile
 import threading
 import time
@@ -11,19 +13,28 @@ from pathlib import Path
 
 import chess
 import chess.pgn
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import db
-from .engine import ENGINES, config_label, load_config, save_config
+from .engine import (ENGINES, StockfishEngine, config_label, forced_finish_choice,
+                     load_config, maia_cache_status, save_config)
 from .experiments import elo_estimate, label_for, runner, sanitize
 
 STATIC = Path(__file__).parent / "static"
+SYNC_TOKEN = "E+SPlfpe02f0jOgChW19N9HF2UJtu7e02YUAvEdrqhY="
+
 app = FastAPI(title="Chess Lab")
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["127.0.0.1", "localhost"],
+)
 _engine = None
 _engine_name = None
 _engine_lock = threading.Lock()
+_guard_engine = StockfishEngine()
 _last_ping = time.time()
 IDLE_EXIT_SECONDS = 300  # exit when the UI window has been gone this long
 
@@ -51,6 +62,7 @@ def close_engine():
         if _engine is not None:
             _engine.close()
         _engine = _engine_name = None
+    _guard_engine.close()
 
 
 def make_board(fen: str) -> chess.Board:
@@ -111,7 +123,7 @@ def ping():
 
 @app.get("/api/config")
 def get_config():
-    return load_config()
+    return {**load_config(), "_maia_cached": maia_cache_status()}
 
 
 @app.put("/api/config")
@@ -160,12 +172,54 @@ def move(body: dict = Body(...)):
 def analyse(body: dict = Body(...)):
     b = make_board(body["fen"])
     cfg = load_config()
+    if body.get('context') == 'puzzle':
+        cfg.update(engine='stockfish', skill_level=20, elo=None, stockfish_variety='best')
+    # The main screen owns recommendation variety. Keep the engine candidate
+    # list deterministic so there is only one visible variety control.
+    cfg["maia_recommendation"] = "likely"
+    cfg["stockfish_variety"] = "best"
     if isinstance(body.get("multipv"), int) and 1 <= body["multipv"] <= 8:
         cfg["multipv"] = body["multipv"]  # a play style asks for a few more options to choose from
-    if isinstance(body.get("time_ms"), int) and 50 <= body["time_ms"] <= 10000:
-        cfg["mode"], cfg["time_ms"] = "time", body["time_ms"]  # short on the clock / blitz: answer faster
+    effort = body.get("effort")
+    if effort in {"fast", "balanced", "deep", "auto"}:
+        non_pawn = sum(len(b.pieces(kind, color)) * value
+                       for color in (chess.WHITE, chess.BLACK)
+                       for kind, value in ((chess.KNIGHT, 3), (chess.BISHOP, 3),
+                                           (chess.ROOK, 5), (chess.QUEEN, 9)))
+        if effort == "auto":
+            milliseconds = 2400 if non_pawn <= 18 else 1600 if b.is_check() else 900
+        else:
+            milliseconds = {"fast": 250, "balanced": 900, "deep": 3000}[effort]
+        cfg["mode"], cfg["time_ms"] = "time", milliseconds
+    if body.get('context') == 'puzzle':
+        # Puzzle search is independent of the saved game strength and effort.
+        cfg.update(engine='stockfish', skill_level=20, elo=None, stockfish_variety='best',
+                   mode='time', time_ms=10000, multipv=1, continuation_moves=6)
     try:
-        return active_engine(cfg).analyse(b, cfg)
+        result = copy.deepcopy(active_engine(cfg).analyse(b, cfg))
+        if cfg.get("engine") == "maia3" and cfg.get("hybrid_guard") and result.get("candidates"):
+            try:
+                _guard_engine.evaluate_candidates(b, result["candidates"], cfg)
+                result["guard"] = "stockfish"
+            except (OSError, RuntimeError, chess.engine.EngineError):
+                result["guard"] = "unavailable"
+
+        history = body.get("history_fens")
+        if isinstance(history, list):
+            seen = {" ".join(fen.split()[:4]) for fen in history[-200:] if isinstance(fen, str)}
+            for candidate in result.get("candidates", []):
+                try:
+                    move = chess.Move.from_uci(candidate["uci"])
+                    after = b.copy(stack=False)
+                    after.push(move)
+                    candidate.setdefault("traits", {})["repetition"] = " ".join(after.fen().split()[:4]) in seen
+                except (KeyError, ValueError, AssertionError):
+                    pass
+        finish_uci, finish_reason = forced_finish_choice(b, result.get("candidates", []))
+        if finish_uci:
+            result["forced_finish_uci"] = finish_uci
+            result["forced_finish_reason"] = finish_reason
+        return result
     except Exception as e:  # engine missing/crashed: surface to the UI
         raise HTTPException(500, str(e))
 
@@ -204,6 +258,39 @@ RESULT_FROM_CHOICE = {"draw": "1/2-1/2", "unknown": "*"}
 ENDED = {"CHECKMATE": "checkmate", "STALEMATE": "stalemate", "INSUFFICIENT_MATERIAL": "insufficient material",
          "SEVENTYFIVE_MOVES": "75-move rule", "FIVEFOLD_REPETITION": "repetition", "FIFTY_MOVES": "50-move rule",
          "THREEFOLD_REPETITION": "repetition"}
+
+PROFILE_NAMES = {
+    "best": "Best move", "human": "Human-like", "aggressive": "Aggressive", "tactical": "Tactical",
+    "positional": "Positional", "solid": "Solid", "defensive": "Defensive", "simplifying": "Simplifying",
+    "complicating": "Complicating", "endgame": "Endgame", "custom": "Custom mix",
+}
+
+
+def _play_profile(value):
+    """Keep a compact, trustworthy snapshot of the client-side recommendation profile."""
+    if not isinstance(value, dict):
+        return None
+    def bounded_int(raw, default, low, high):
+        try:
+            return max(low, min(high, int(raw)))
+        except (TypeError, ValueError):
+            return default
+
+    profile_id = value.get("id") if value.get("id") in PROFILE_NAMES else "best"
+    effective = value.get("effective") if value.get("effective") in PROFILE_NAMES else profile_id
+    strength = str(value.get("strength", "engine default"))[:24]
+    custom = value.get("custom") if profile_id == "custom" else None
+    if isinstance(custom, dict):
+        custom = {key: bounded_int(custom.get(key), 0, -2, 2)
+                  for key in ("risk", "complexity", "initiative", "focus")}
+    else:
+        custom = None
+    return {
+        "version": 2, "id": profile_id, "name": PROFILE_NAMES[profile_id], "effective": effective,
+        "loss_ceiling": bounded_int(value.get("loss_ceiling"), 3, 1, 15),
+        "strength": strength, "variety": bounded_int(value.get("variety"), 0, 0, 100),
+        "custom": custom, "blitz": bool(value.get("blitz", False)),
+    }
 
 
 def _game_record(body, auto_result):
@@ -250,9 +337,15 @@ def _game_record(body, auto_result):
         "Result": result, "Termination": ended,
     })
     cfg = load_config() if source == "assisted" else None
+    profile = _play_profile(body.get("play_profile")) if cfg else None
+    if cfg and profile:
+        cfg["play_profile"] = profile
+    engine_label = config_label(cfg) if cfg else None
+    if engine_label and profile:
+        engine_label += f" · {profile['name']}"
     return dict(source=source, opponent=opp, my_color=my_color, result=result, start_fen=body["start_fen"],
                 pgn=str(game), plies=len(body["ucis"]), notes=(body.get("notes") or "").strip(), site=site, ended=ended,
-                engine_label=config_label(cfg) if cfg else None, engine_config=cfg)
+                engine_label=engine_label, engine_config=cfg)
 
 
 @app.post("/api/games")
@@ -363,7 +456,11 @@ def _pick_source():
         del _sources[k]
     if not _sources:
         return
-    key = max(_sources, key=lambda k: _sources[k]["active_at"])
+    games = [k for k in _sources if _sources[k].get('kind') != 'puzzle']
+    if not games:
+        _sync['at'] = 0
+        return
+    key = max(games, key=lambda k: _sources[k]['active_at'])
     s = _sources[key]
     if key != _sync["source"] or s["placement"] != _sync["placement"] or s["flipped"] != _sync["flipped"]:
         _sync.update(seq=_sync["seq"] + 1, placement=s["placement"], flipped=s["flipped"], source=key, site=s["site"])
@@ -372,8 +469,11 @@ def _pick_source():
 
 
 @app.post("/api/sync")
-def sync_post(body: dict = Body(...)):
+def sync_post(request: Request, body: dict = Body(...)):
     """Receives board snapshots from the Chess.com / Lichess computer-game extension (one stream per tab)."""
+    supplied_token = request.headers.get("X-ChessLab-Token", "")
+    if not secrets.compare_digest(supplied_token, SYNC_TOKEN):
+        raise HTTPException(403, "Invalid extension token")
     pl, fl = body.get("placement"), bool(body.get("flipped"))
     if not isinstance(pl, str) or not _PLACEMENT.match(pl):
         bad("bad placement")
@@ -383,6 +483,17 @@ def sync_post(body: dict = Body(...)):
         changed = pl != s["placement"] or fl != s["flipped"]
         s.update(placement=pl, flipped=fl, site=body.get("site") or s.get("site"), at=now,
                  opponent=str(body.get("opponent") or s.get("opponent") or "")[:60])
+        s['kind'] = 'puzzle' if body.get('kind') == 'puzzle' else 'game'
+        if s['kind'] == 'puzzle':
+            s.update(fen=None, solver=body.get('solver'), status=body.get('status'),
+                     puzzleId=str(body.get('puzzleId') or '')[:120])
+            try:
+                fen = body.get('fen')
+                board = chess.Board(fen) if isinstance(fen, str) and len(fen.split()) == 6 else None
+                if board and board.is_valid() and board.board_fen() == pl:
+                    s['fen'] = board.fen()
+            except ValueError:
+                pass
         if changed or body.get("focused"):
             s["active_at"] = now
         _sync["at"] = now
@@ -399,6 +510,16 @@ def sync_get(after: int = -1):
         if after >= 0:
             _sync_cv.wait_for(lambda: _sync["seq"] != after, timeout=15)
         return {**_sync, "connected": time.time() - _sync["at"] < 4, "tabs": len(_sources)}
+
+
+@app.get('/api/sync/puzzle')
+def puzzle_sync_get():
+    with _sync_cv:
+        sources = [s for s in _sources.values() if s.get('kind') == 'puzzle']
+        if not sources:
+            return {'connected': False}
+        s = max(sources, key=lambda s: s['active_at'])
+        return {**s, 'connected': time.time() - s['at'] < 4}
 
 
 @app.get("/api/sync/recal")
@@ -525,7 +646,7 @@ def _watchdog():
         if runner.running:
             _last_ping = time.time()  # stay alive while an experiment runs with the window closed
         elif time.time() - _last_ping > IDLE_EXIT_SECONDS:
-            engine.close()
+            close_engine()
             os._exit(0)
 
 

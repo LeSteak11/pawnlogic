@@ -11,4 +11,5 @@ config.json
 build/
 dist/
 .tools/
+.test-data/
 release.json

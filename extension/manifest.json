@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chess Lab Sync",
-  "version": "1.5.4",
+  "version": "1.5.6",
   "description": "Sends the board from Chess.com and Lichess games to Chess Lab on this PC. Read-only.",
   "host_permissions": [
     "http://127.0.0.1:8765/*",
@@ -23,7 +23,9 @@
         "https://lichess.org/*",
 	"https://www.chess.com/play/online",
 	"https://www.chess.com/game/",
-        "https://www.chess.com/game/*"
+        "https://www.chess.com/game/*",
+	"https://www.chess.com/puzzles/rated",
+	"https://www.chess.com/puzzles"
       ],
       "js": [
         "content.js"

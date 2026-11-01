@@ -1,6 +1,7 @@
 // Relays board snapshots from Chess.com / Lichess game tabs to the local Chess Lab server, tagged per tab.
 // Also handles Chess Lab's "Reconnect": re-attaches to open game tabs and asks them for a fresh snapshot.
 const SERVER = "http://127.0.0.1:8765/";
+const SYNC_TOKEN = "E+SPlfpe02f0jOgChW19N9HF2UJtu7e02YUAvEdrqhY=";
 // The manifest is the single source of truth for supported game URLs. Reconnect
 // must include the same pages as automatic content-script injection.
 const GAME_URLS = [...new Set(chrome.runtime.getManifest().content_scripts.flatMap((s) => s.matches))];
@@ -22,7 +23,12 @@ async function checkRecal(n) {
 chrome.runtime.onMessage.addListener((msg, sender) => {
   const source = sender.tab ? `${msg.site || "tab"}:${sender.tab.id}` : "default";
   fetch(SERVER + "api/sync", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...msg, source }),
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ChessLab-Token": SYNC_TOKEN,
+    },
+    body: JSON.stringify({ ...msg, source }),
   }).then((r) => r.json()).then((d) => { if (typeof d.recal === "number") checkRecal(d.recal); }).catch(() => {});
 });
 

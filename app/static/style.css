@@ -71,6 +71,14 @@ tbody tr:hover { background: var(--panel2); }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: min(520px, 94vw); }
 dialog::backdrop { background: rgba(0, 0, 0, .55); }
 dialog h3 { margin: 0 0 12px; } .dlgbtns { display: flex; justify-content: flex-end; gap: 8px; }
+#settings{width:min(680px,96vw);max-height:92vh;overflow-y:auto}
+.settings-panel{border-top:1px solid var(--line);padding-top:14px;margin-top:4px}
+.settings-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:0 0 10px}
+.settings-note{font-size:12px;line-height:1.45;color:var(--muted);padding:7px 9px;background:rgba(255,255,255,.025);border-radius:7px}
+.formgrid label small{font-size:11px;line-height:1.35;color:var(--muted)}
+.formgrid .check-label{display:flex;flex-direction:row;align-items:center;gap:8px}.formgrid .check-label input{width:auto}
+.settings-general{margin-bottom:14px}
+#settings .dlgbtns{position:sticky;bottom:-18px;background:var(--panel);border-top:1px solid var(--line);padding:12px 0 2px;margin-top:2px}
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 10px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; max-width: 90vw; }
 #toast.show { opacity: 1; } #toast.err { border-color: var(--bad); }
 tr.sel{background:var(--panel2)}
@@ -196,6 +204,21 @@ input:focus,select:focus,textarea:focus{outline:2px solid #3f6b54}
 .srow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .srow .label{margin:0}
 .seg button{padding:5px 11px;font-size:14px}
+.profile-row{align-items:flex-end}
+.profile-pick{display:flex;flex-direction:column;gap:4px;min-width:190px;flex:1}
+.profile-pick select{width:100%}
+.profile-summary{font-size:13px;line-height:1.4;margin-top:7px;min-height:18px}
+.profile-custom{border-top:1px solid var(--line);margin-top:10px;padding-top:9px}
+.profile-custom summary{list-style:none;cursor:pointer;display:flex;gap:8px;align-items:center}
+.profile-custom summary::-webkit-details-marker{display:none}
+.profile-custom summary::before{content:"▸";color:var(--muted)}
+.profile-custom[open] summary::before{content:"▾"}
+.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:9px 14px;margin-top:10px}
+.profile-grid label{font-size:12px;color:var(--muted);display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px}
+.profile-grid label>span{color:var(--text);font-weight:600}
+.profile-grid input[type="range"]{grid-column:1/-1;width:100%;padding:0;border:0;background:none;accent-color:var(--accent)}
+.profile-grid select{grid-column:1/-1;width:100%;padding:5px 8px}
+#profile-reset{align-self:end;font-size:12px}
 .costlbl{font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
 .costlbl select{width:auto;padding:4px 8px}
 #op-card{margin-top:10px}#op-card summary{list-style:none}#op-card summary::-webkit-details-marker{display:none}
@@ -209,11 +232,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid #3f6b54}
 .clockchip{font-variant-numeric:tabular-nums}
 .clockchip.low{border-color:var(--bad);color:var(--bad)}
 .clockwarn{font-size:14px;font-weight:600;color:var(--bad);margin:2px 0 6px}
-/* strength slider */
-.lvlrow{margin-top:10px}
-#level{width:150px;padding:0;accent-color:var(--accent);background:none;border:0}
-#level.weak{accent-color:var(--draw)}
-.lvlname{font-weight:600;font-variant-numeric:tabular-nums;min-width:38px}
+.recommendation-controls{border-top:1px solid var(--line);margin-top:10px;padding-top:9px}
+.recommendation-controls label{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1}
+.recommendation-controls select{width:100%;padding:5px 8px}
 /* blitz toggle */
 .blitz-btn{padding:5px 12px;font-size:14px;margin-left:auto;transition:background-color .2s,border-color .2s,color .2s}
 .blitz-btn.on{background:rgba(199,166,86,.14);border-color:#a8893f;color:#e2c47a;animation:blitzGlow 2.4s ease-in-out infinite}
@@ -229,6 +250,7 @@ body.blitz #best-info,body.blitz .cdesc,body.blitz .candhead span{display:none}
 body.blitz .cand{padding:6px 10px;margin-bottom:4px}
 body.blitz .cbar{margin:5px 0 0}
 @media (prefers-reduced-motion:reduce){.blitz-btn.on,body.blitz .card.rec::before{animation:none}}
+@media (max-width:520px){.profile-grid{grid-template-columns:1fr}.profile-pick{min-width:100%}.blitz-btn{margin-left:0}}
 /* finish a resigned / timed-out game */
 .endrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:14px}
 .endrow button{padding:4px 10px;font-size:13px}
@@ -286,3 +308,9 @@ body.blitz .cand{height:44px}
 #moves-note{height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .endrow{height:32px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
 .srow{min-height:34px}
+body.puzzle-mode .stylecard,
+body.puzzle-mode #winbox,
+body.puzzle-mode #rec-head,
+body.puzzle-mode #save-card {
+  display: none !important;
+}

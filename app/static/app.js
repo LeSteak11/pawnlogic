@@ -24,6 +24,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 /* ---------- game state ---------- */
 const S = {
+  puzzle: false, puzzleReady: false, puzzleKey: '', puzzlePlacement: null, epoch: 0,
   startFen: START, plies: [], cursor: 0, orient: "white", st: null, analysis: null, viewing: null,
   pick: -1, opts: null, optsFen: null, recIdx: 0, gameId: null, gameFinal: false, live: { site: "", opponent: "" }, // auto-save record for the game in progress
 };
@@ -81,7 +82,8 @@ function drawBoard() {
     return;
   }
   const best = pickedCand();
-  $("#board").innerHTML = boardSvg(curFen(), {
+  const displayFen = S.puzzle && S.puzzlePlacement ? S.puzzlePlacement + ' w - - 0 1' : curFen();
+  $("#board").innerHTML = boardSvg(displayFen, {
     flip: S.orient === "black", last: S.cursor > 0 ? S.plies[S.cursor - 1].uci : null, selected,
     legal: S.st ? S.st.legal : [], arrow: best ? best.uci : null,
   });
@@ -171,7 +173,10 @@ $("#board").addEventListener("click", (e) => {
 /* ---------- position / render ---------- */
 async function refresh(now = false) {
   selected = null; S.pick = -1;
-  S.st = await api("/api/state", { fen: curFen() });
+  const fen = curFen(), epoch = S.epoch;
+  const state = await api("/api/state", { fen });
+  if (epoch !== S.epoch || fen !== curFen()) return;
+  S.st = state;
   drawBoard(); renderStatus(); renderMoves(); updateSaveForm();
   analyse(now);
 }
@@ -276,6 +281,7 @@ function newGame(fen, plies = [], viewing = null) {
 }
 
 async function playText(text) {
+  if (S.puzzle) return toast('Play the move on Chess.com.');
   if (E.on) return;
   if (!S.st || S.st.over) return toast("The game is over — undo or reset.", true);
   try {
@@ -301,6 +307,7 @@ let aborter = null, aTimer = null;
 const bestCand = () => (S.analysis && S.analysis.fen === curFen() && S.analysis.candidates ? S.analysis.candidates[0] : null);
 const pickedCand = () => (S.opts && S.optsFen === curFen() ? (S.opts[S.pick >= 0 && S.pick < S.opts.length ? S.pick : S.recIdx] || S.opts[0]).c : null);
 function analyse(now = false) {
+  if (S.puzzle && !S.puzzleReady) return;
   if (E.on) return;
   clearTimeout(aTimer);
   if (aborter) aborter.abort();
@@ -312,15 +319,18 @@ function analyse(now = false) {
   }
   renderAnalysis(true);
   aTimer = setTimeout(async () => {
-    const fen = curFen(), ctl = aborter = new AbortController();
+    const fen = curFen(), epoch = S.epoch, ctl = aborter = new AbortController();
     const t0 = performance.now();
     const watchdog = setTimeout(() => ctl.abort("timeout"), 120000); // first Maia model download/load can take a while
     try {
       for (let tries = 0; ; tries++) {
-        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fen, multipv: wantsMore() ? 5 : undefined, time_ms: thinkMs() }), signal: ctl.signal });
+        const history_fens = Array.from({ length: S.cursor + 1 }, (_, i) => fenAt(i));
+        const r = await fetch("/api/analyse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          fen, context: S.puzzle ? 'puzzle' : 'game', effort: S.puzzle ? 'deep' : PREF.blitz ? "fast" : PREF.effort, history_fens,
+        }), signal: ctl.signal });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail);
-        if (fen !== curFen()) return;
+        if (fen !== curFen() || epoch !== S.epoch) return;
         if (d.superseded) { if (tries < 3) continue; throw new Error("Engine busy — try again"); } // cancelled by another request: ask again
         S.analysis = { ...d, fen, secs: (performance.now() - t0) / 1000 };
         if (d.engine === "stockfish" && d.candidates && d.candidates.length) EV.set(fen, d.candidates);
@@ -414,15 +424,32 @@ function renderWin(score) {
   $("#win-fill").style.width = p + "%"; $("#win-fill").style.background = col;
   $("#evalfill").style.height = p + "%";
 }
-/* ---------- play style + opening book (pick among the engine's good moves; the engine itself is unchanged) ---------- */
-const STYLES = { balanced: "Balanced", aggressive: "Aggressive", solid: "Solid", simple: "Simple" };
-const PREF = { style: store.get("cl_style", "balanced"), cost: store.get("cl_style_cost", 3), ops: store.get("cl_openings", { white: "", e4: "", d4: "" }),
-  blitz: store.get("cl_blitz", false), level: store.get("cl_level", 0) };
-// Strength: 0 = Max (always the best). Lower levels deliberately recommend weaker options; grading stays full strength.
-const LEVELS = [{ name: "Max", win: 0 }, { name: "2200", win: 4 }, { name: "1800", win: 8 }, { name: "1500", win: 14 }, { name: "1200", win: 22 }];
-const effStyle = () => (PREF.blitz && PREF.style === "balanced" ? "simple" : PREF.style); // blitz leans to quick, clear moves
+/* ---------- play profiles + opening book ---------- */
+const STYLES = {
+  best: { name: "Best move", desc: "Follow the engine's recommendation without a style bias.", weights: {} },
+  human: { name: "Human-like", desc: "Prefer the engine's modeled or configured human choice.", human: true, weights: {} },
+  aggressive: { name: "Aggressive", desc: "Press the king, keep the initiative and accept sharper play.", weights: { check: 3, kingPressure: 2, pawnStorm: 1.5, forcing: 1, capture: .7, queenTrade: -2, retreat: -1 } },
+  tactical: { name: "Tactical", desc: "Favor forcing sequences, concrete captures and promotions.", weights: { check: 3, forcing: 2.5, capture: 1.5, captureValue: .8, promotion: 5, quiet: -1 } },
+  positional: { name: "Positional", desc: "Improve activity, development, space and central control.", weights: { develop: 2.5, center: 1.5, activity: 1.2, advance: .35, castle: 1.5, quiet: .5, kingMove: -1 } },
+  solid: { name: "Solid", desc: "Prioritize king safety, development and low-risk improvement.", weights: { castle: 3, develop: 1.8, trade: .8, aheadTrade: 1.5, quiet: .7, pawnStorm: -1.5, kingMove: -1.5 } },
+  defensive: { name: "Defensive", desc: "Reduce danger with safety, retreats and well-timed exchanges.", weights: { castle: 2.5, trade: 1.8, queenTrade: 1.5, retreat: 1, quiet: .5, pawnStorm: -2, kingMove: -1 } },
+  simplifying: { name: "Simplifying", desc: "Trade pieces and queens to make the position easier to handle.", weights: { trade: 3, queenTrade: 3, capture: .6, develop: .5, forcing: .4, pawnStorm: -1 } },
+  complicating: { name: "Complicating", desc: "Keep pieces and queens on the board and preserve practical tension.", weights: { trade: -2.5, queenTrade: -4, quiet: 1.2, kingPressure: 1.2, center: .8, forcing: .5 } },
+  endgame: { name: "Endgame", desc: "Activate the king, advance passed pawns and simplify when the ending is near.", weights: { endgameKing: 3, passedPawn: 3, promotion: 5, trade: 1.8, queenTrade: 1.5, advance: .7, activity: 1 } },
+  custom: { name: "Custom mix", desc: "Combine risk, complexity, initiative and tactical focus yourself.", custom: true, weights: {} },
+};
+const CUSTOM_DEFAULT = { risk: 0, complexity: 0, initiative: 0, focus: 0 };
+const oldStyle = store.get("cl_style", "balanced");
+const migratedStyle = ({ balanced: "best", simple: "simplifying" })[oldStyle] || oldStyle;
+const PREF = { style: store.get("cl_profile", migratedStyle), cost: store.get("cl_style_cost", 3), ops: store.get("cl_openings", { white: "", e4: "", d4: "" }),
+  blitz: store.get("cl_blitz", false), effort: store.get("cl_effort", "auto"), variety: store.get("cl_profile_variety", 0),
+  custom: { ...CUSTOM_DEFAULT, ...store.get("cl_profile_custom", {}) } };
+if (!STYLES[PREF.style]) PREF.style = "best";
+if (!["auto", "fast", "balanced", "deep", "custom"].includes(PREF.effort)) PREF.effort = "auto";
+const effStyle = () => (PREF.blitz && PREF.style === "best" ? "simplifying" : PREF.style);
+const profileName = () => (PREF.blitz ? "⚡ " : "") + STYLES[effStyle()].name;
 const effCost = () => (PREF.blitz ? Math.min(PREF.cost, 2) : PREF.cost);
-const wantsMore = () => effStyle() !== "balanced" || PREF.level > 0; // choosing among options needs 5 of them
+const wantsMore = () => effStyle() !== "best" || PREF.variety > 0;
 function hash01(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return (h >>> 0) / 4294967296; }
 const normSan = (s) => s.replace(/[+#!?]/g, "");
 const sqXY = (s) => ["abcdefgh".indexOf(s[0]), +s[1] - 1];
@@ -444,44 +471,91 @@ function moveFeatures(c, fen, mover, win) {
   f.shieldPush = type === "p" && !!oK && (oK[0] <= 2 || oK[0] >= 6) && Math.abs(ff - oK[0]) <= 1 && !f.capture;
   f.develop = (type === "n" || type === "b") && fr === (me ? 0 : 7) && S.cursor < 24;
   f.retreat = type !== "p" && (me ? tr < fr : tr > fr);
-  f.ahead = win >= 60;
-  return f;
+  f.ahead = win != null && win >= 60;
+  const merged = { ...f, ...(c.traits || {}) };
+  merged.endgameKing = !!merged.endgame && type === "k";
+  merged.aheadTrade = !!merged.trade && merged.ahead;
+  merged.aheadQueenTrade = !!merged.queenTrade && merged.ahead;
+  return merged;
 }
-const BONUS = {
-  aggressive: { check: 2, closer: 1.5, pawnStorm: 1, capture: 1, queenTrade: -2, retreat: -1, castle: 0.5 },
-  solid: { castle: 3, develop: 1.5, trade: 0.5, aheadTrade: 1.5, aheadQueenTrade: 1, shieldPush: -2, pawnStorm: -1 },
-  simple: { trade: 2, queenTrade: 2, castle: 1, develop: 1, capture: 0.5, pawnStorm: -1, shieldPush: -1 },
-};
-const FEATURE_WORDS = { check: "gives check", closer: "brings a piece at their king", pawnStorm: "pushes pawns at their king", capture: "captures",
-  castle: "castles your king", develop: "develops a piece", trade: "trades pieces", aheadTrade: "trades while ahead", queenTrade: "trades queens",
-  aheadQueenTrade: "trades queens while ahead" };
+const FEATURE_WORDS = { check: "gives check", closer: "presses their king", kingPressure: "increases king pressure", pawnStorm: "pushes pawns at their king", capture: "captures",
+  captureValue: "wins material", castle: "castles your king", develop: "develops a piece", center: "improves central control", activity: "activates a piece",
+  trade: "trades pieces", aheadTrade: "trades while ahead", queenTrade: "trades queens", aheadQueenTrade: "trades queens while ahead",
+  forcing: "creates a forcing line", promotion: "pushes a promotion", passedPawn: "advances a passed pawn", endgameKing: "activates the king", quiet: "keeps tension" };
+function customWeights() {
+  const w = {}, add = (key, value) => { w[key] = (w[key] || 0) + value; };
+  const { risk, complexity, initiative, focus } = PREF.custom;
+  add("check", risk * 1.1); add("capture", risk * .6); add("kingPressure", risk * 1.2); add("castle", risk * -.5); add("retreat", risk * -.5);
+  add("trade", complexity * -1.4); add("queenTrade", complexity * -2); add("quiet", complexity * .5); add("forcing", complexity * .4);
+  add("check", initiative * 1.2); add("forcing", initiative * 1.2); add("advance", initiative * .4); add("develop", initiative * .5); add("retreat", initiative * -.5);
+  add("check", focus * 1.1); add("capture", focus * .8); add("forcing", focus * 1.1); add("promotion", focus * 2);
+  add("develop", focus * -.9); add("center", focus * -.7); add("activity", focus * -.7); add("castle", focus * -.6);
+  return w;
+}
 function styleScore(style, f) {
-  const B = BONUS[style] || {}, hits = [];
+  const B = style === "custom" ? customWeights() : STYLES[style].weights, hits = [];
   let s = 0;
-  const add = (k, on) => { if (on && B[k]) { s += B[k]; if (B[k] > 0) hits.push(k); } };
-  for (const k of ["check", "closer", "pawnStorm", "capture", "castle", "develop", "trade", "queenTrade", "shieldPush", "retreat"]) add(k, f[k]);
-  add("aheadTrade", f.trade && f.ahead); add("aheadQueenTrade", f.queenTrade && f.ahead);
+  for (const [k, weight] of Object.entries(B)) {
+    const raw = f[k];
+    if (!raw || !weight) continue;
+    const contribution = weight * (typeof raw === "number" ? raw : 1);
+    s += contribution;
+    if (contribution > 0) hits.push(k);
+  }
   if (hits.includes("trade") && hits.includes("capture")) hits.splice(hits.indexOf("capture"), 1);
   return { s, hits };
 }
 // Returns { idx, why } — which engine candidate the chosen style recommends.
-function stylePick(info, fen, mover) {
-  if (PREF.level > 0 && info.length > 1) { // weaker on purpose: stable per position, varied across positions
-    const L = LEVELS[PREF.level], target = hash01(fen + PREF.level) * L.win;
-    let idx = 0; info.forEach((o, i) => { if (o.loss <= L.win && Math.abs(o.loss - target) < Math.abs(info[idx].loss - target)) idx = i; });
-    return { idx, why: `Level ${L.name} pick` + (info[idx].loss >= 0.5 ? ` (−${info[idx].loss.toFixed(1)}% vs best)` : "") };
-  }
+function stylePick(info, fen, mover, baseIdx = 0) {
   const style = effStyle();
-  if (style === "balanced" || info.length < 2) return { idx: 0, why: "" };
-  let best = { idx: 0, val: -Infinity, hits: [] };
+  if (info.length < 2) return { idx: baseIdx, why: "" };
+  const ceiling = effCost(), target = 0;
+  const choices = [];
   info.forEach((o, i) => {
-    if (o.loss > effCost()) return;
-    const { s, hits } = styleScore(style, moveFeatures(o.c, fen, mover, o.w));
-    const val = s - o.loss * 0.3;
-    if (val > best.val + 1e-9) best = { idx: i, val, hits };
+    if (!Number.isFinite(o.loss) || o.loss > ceiling) return;
+    const features = moveFeatures(o.c, fen, mover, o.qualityWin);
+    const { s, hits } = styleScore(style, features);
+    const styleValue = style === "best" || STYLES[style].human ? 0 : s;
+    choices.push({ idx: i, val: styleValue - Math.abs(o.loss - target) * .35, hits, repetition: !!features.repetition });
   });
-  const name = (PREF.blitz ? "⚡ " : "") + STYLES[style], o = info[best.idx], what = best.hits.map((k) => FEATURE_WORDS[k]).slice(0, 2).join(", ");
-  return { idx: best.idx, why: best.idx === 0 ? `${name}: the engine's best already fits${what ? ` (${what})` : ""}` : `${name} pick: ${what || "fits the style"} (−${o.loss.toFixed(1)}% vs engine best)` };
+  if (!choices.length) return { idx: baseIdx, why: "" };
+  const topQuality = Math.max(...info.map((o) => o.qualityWin == null ? -Infinity : o.qualityWin));
+  const safeChoices = topQuality >= 65 && choices.some((choice) => !choice.repetition) ? choices.filter((choice) => !choice.repetition) : choices;
+  if ((style === "best" || STYLES[style].human) && PREF.variety === 0) {
+    const chosen = safeChoices.slice().sort((a, b) => info[a.idx].loss - info[b.idx].loss || a.idx - b.idx)[0];
+    return chosen.idx === baseIdx ? { idx: baseIdx, why: "" } : { idx: chosen.idx, why: "Avoids repeating a winning position" };
+  }
+  safeChoices.sort((a, b) => b.val - a.val || a.idx - b.idx);
+  const spread = (PREF.variety / 100) * 3;
+  const pool = safeChoices.filter((choice) => choice.val >= safeChoices[0].val - spread);
+  const selected = pool[Math.min(pool.length - 1, Math.floor(hash01(`${fen}|${style}|${PREF.variety}`) * pool.length))];
+  const o = info[selected.idx], what = selected.hits.map((k) => FEATURE_WORDS[k]).filter(Boolean).slice(0, 2).join(", ");
+  const versus = selected.idx === baseIdx ? "engine choice" : `−${Math.max(0, o.loss).toFixed(1)}% vs best`;
+  return { idx: selected.idx, why: `${profileName()}: ${what || STYLES[style].name.toLowerCase()} · ${versus}` };
+}
+function mateFor(c, mover) {
+  const score = c.quality_score || c.score, mate = score && score.mate;
+  return mate == null ? null : (mover === "white" ? mate : -mate);
+}
+function finishingPick(info, mover) {
+  const immediate = info.findIndex((o) => o.c.san && o.c.san.includes("#"));
+  if (immediate >= 0) return { idx: immediate, why: "Immediate checkmate" };
+  const winning = info.map((o, idx) => ({ idx, mate: mateFor(o.c, mover) })).filter((o) => o.mate > 0);
+  if (winning.length) {
+    winning.sort((a, b) => a.mate - b.mate || a.idx - b.idx);
+    return { idx: winning[0].idx, why: `Shortest proven mate · M${winning[0].mate}` };
+  }
+  const losing = info.map((o, idx) => ({ idx, mate: mateFor(o.c, mover) }));
+  if (losing.length && losing.every((o) => o.mate < 0)) {
+    losing.sort((a, b) => Math.abs(b.mate) - Math.abs(a.mate) || a.idx - b.idx);
+    return { idx: losing[0].idx, why: `Longest resistance · M${Math.abs(losing[0].mate)}` };
+  }
+  return null;
+}
+function playProfileSnapshot() {
+  return { version: 1, id: PREF.style, name: STYLES[PREF.style].name, effective: effStyle(), loss_ceiling: PREF.cost,
+    strength: currentStrengthLabel(), variety: PREF.variety, custom: PREF.style === "custom" ? { ...PREF.custom } : null,
+    blitz: PREF.blitz };
 }
 function repertoireFor() {
   if (S.viewing || S.startFen !== START) return null;
@@ -537,7 +611,7 @@ const candHead = (note) => `<div class="candhead">Move options <span${note ? ' c
 function holdCands() { // keep the previous options where they are (dimmed) so nothing below moves
   const c = $("#cands");
   if (c.querySelector(".cand:not(.ph)")) c.classList.add("stale");
-  else { c.classList.remove("stale"); c.innerHTML = candHead("") + Array.from({ length: wantsMore() ? 5 : 3 }, () => `<div class="cand ph"></div>`).join(""); }
+  else { c.classList.remove("stale"); c.innerHTML = candHead("") + Array.from({ length: wantsMore() ? 8 : 3 }, () => `<div class="cand ph"></div>`).join(""); }
 }
 function clearRec(big, sub) {
   setText($("#best-move"), big); $("#best-desc").textContent = sub || "";
@@ -545,16 +619,30 @@ function clearRec(big, sub) {
   holdCands(); renderWin(null);
 }
 function renderAnalysis(busy) {
+  if (S.puzzle && !S.puzzleReady) return;
   const a = S.analysis, ok = a && a.fen === curFen() && a.candidates;
   renderRecHead();
-  const book = bookInfo();
+  const book = S.puzzle ? null : bookInfo();
   if (!ok && !(book && book.uci)) { S.opts = null; return busy ? clearRec("…", "Calculating") : undefined; }
   if (ok && !a.candidates.length) { S.opts = null; return clearRec("—", S.st.over ? "The game is over." : "No legal move."); }
   const human = ok && a.engine === "maia3", mover = S.st.turn, cands = ok ? a.candidates : [];
-  const chances = cands.map((c) => winPct(c.score, mover));
-  const top = chances.length ? (human ? Math.max(...chances) : chances[0]) : null;
-  let info = cands.map((c, i) => { const w = chances[i], loss = Math.max(0, top - w); return { c, w, loss, grade: human ? null : (i === 0 ? "Best" : gradeOf(loss)) }; });
-  let rec = stylePick(info, curFen(), mover);
+  const chances = cands.map((c) => c.score ? winPct(c.score, mover) : null);
+  const qualityChances = cands.map((c) => (c.quality_score || c.score) ? winPct(c.quality_score || c.score, mover) : null);
+  const measured = qualityChances.filter((value) => value != null);
+  const top = measured.length ? Math.max(...measured) : null;
+  let info = cands.map((c, i) => {
+    const w = chances[i], qualityWin = qualityChances[i], loss = qualityWin == null || top == null ? Infinity : Math.max(0, top - qualityWin);
+    return { c, w, qualityWin, loss, grade: human || qualityWin == null ? null : (loss <= .5 ? "Best" : gradeOf(loss)) };
+  });
+  const engineIdx = ok ? Math.max(0, cands.findIndex((c) => c.uci === a.recommended_uci)) : 0;
+  const forcedIdx = a.forced_finish_uci ? info.findIndex((o) => o.c.uci === a.forced_finish_uci) : -1;
+  let rec = S.puzzle ? {idx: engineIdx, why: 'Puzzle · best engine move'} : forcedIdx >= 0 ? { idx: forcedIdx, why: a.forced_finish_reason || "Forced finish" }
+    : finishingPick(info, mover) || stylePick(info, curFen(), mover, engineIdx);
+  if (!rec.why && a.recommendation_mode === "sampled") rec.why = "Maia human-variation sample";
+  else if (!rec.why && String(a.recommendation_mode || "").startsWith("bounded:")) {
+    const loss = +a.recommendation_mode.split(":")[1] || 0;
+    rec.why = `Bounded variety${loss ? ` (−${loss} cp vs best)` : ""}`;
+  } else if (!rec.why && a.recommendation_mode === "configured-strength" && engineIdx !== 0) rec.why = "Stockfish choice at configured strength";
   if (book && book.uci) { // your opening: the book move leads, graded by the engine when it's one of its options
     const at = info.findIndex((o) => o.c.uci === book.uci);
     const bo = at >= 0 ? info.splice(at, 1)[0] : { c: { uci: book.uci, san: book.san, pv: [book.san], score: null }, w: null, loss: null, grade: null };
@@ -562,16 +650,17 @@ function renderAnalysis(busy) {
     rec = { idx: 0, why: `Book: ${book.name}, move ${book.moveNo}` + (bo.loss != null && bo.loss >= 5 ? ` (engine prefers ${cands[0].san}, −${bo.loss.toFixed(0)}%)` : "") };
   }
   S.opts = info; S.optsFen = curFen(); S.recIdx = rec.idx;
-  const pick = S.pick >= 0 && S.pick < info.length ? S.pick : rec.idx, p = info[pick].c;
-  const only = !human && info.length > 1 && cands.length > 1 && winPct(cands[0].score, mover) - winPct(cands[1].score, mover) >= 10;
+  const pick = S.pick >= 0 && S.pick < info.length ? S.pick : rec.idx, chosen = info[pick], p = chosen.c;
+  const only = info.length > 1 && info[0].qualityWin != null && info[1].qualityWin != null
+    && info[0].qualityWin - info[1].qualityWin >= 10;
   $("#cands").classList.remove("stale");
   setText($("#best-move"), p.san);
   $("#best-desc").textContent = moveDesc(p) + (pick === rec.idx && rec.why ? ` · ${rec.why}` : "");
   if (p.score) { $("#best-eval").textContent = human ? `Human-game outcome estimate · ${Math.round(winPct(p.score, mover))}%` : `${evalText(p.score)}  ${evalWords(p.score)}`; $("#best-eval").className = "evtag " + tone(p.score); }
-  else { $("#best-eval").textContent = "Book move · engine still thinking"; $("#best-eval").className = "evtag even"; }
-  $("#best-info").textContent = ok ? (human ? `Maia-3 ${String(a.model || "5m").toUpperCase()} · modeled Elo ${a.elo} · ${a.secs.toFixed(1)}s` : `Depth ${a.depth} · ${a.secs.toFixed(1)}s · scores shown from ${S.viewing ? "White's" : "your"} side`) : "";
+  else { $("#best-eval").textContent = chosen.book ? "Book move · engine still thinking" : "Sampled move · outcome estimate unavailable"; $("#best-eval").className = "evtag even"; }
+  $("#best-info").textContent = ok ? (human ? `Maia-3 ${String(a.model || "5m").toUpperCase()} · modeled Elo ${a.elo}${a.guard === "stockfish" ? " · locally verified" : ""} · ${a.secs.toFixed(1)}s` : `Depth ${a.depth} · ${a.secs.toFixed(1)}s · searched engine evaluation`) : "";
   renderWin(cands.length ? cands[0].score : null);
-  const left = book && book.left ? `Left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "balanced" ? ` + ${STYLES[effStyle()]}` : ""} from here` : "";
+  const left = book && book.left ? `Left the ${esc(book.name)} at move ${book.moveNo}: engine${effStyle() !== "best" ? ` + ${STYLES[effStyle()].name}` : ""} from here` : "";
   $("#cands").innerHTML = candHead(left) + info.map((o, i) => {
     const { c, w, grade } = o, engineTop = !o.book && c === cands[0];
     const tags = (i === rec.idx ? `<span class="tag rec-tag">Recommended</span>` : "") + (o.book ? `<span class="tag book-tag">Book</span>` : "")
@@ -580,7 +669,7 @@ function renderAnalysis(busy) {
       <div class="ctop"><span class="rk">${i + 1}</span><b>${esc(c.san)}</b>${tags}
         <span class="spacer"></span>${grade ? `<span class="grade ${gcls(grade)}">${grade}</span>` : ""}<span class="cw">${w == null ? "…" : Math.round(w) + "%"}</span></div>
       <div class="cbar"><i style="width:${w || 0}%;background:${w == null ? "transparent" : winColor(w)}"></i></div>
-      <div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc(c.pv.slice(1, 4).join(" "))}</span></div>
+        <div class="cdesc">${esc(moveDesc(c))} <span class="pv">${esc(c.pv.slice(1).join(" "))}</span></div>
     </div>`;
   }).join("");
 }
@@ -615,11 +704,12 @@ function updateSaveForm() {
   else if (!auto.disabled) $("#f-result").value = "auto";
 }
 $("#btn-save").onclick = async () => {
+  if (S.puzzle) return;
   if (!S.plies.length) return toast("Nothing to save: no moves yet.", true);
   const body = {
     start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), opponent: $("#f-opp").value, my_color: $("#f-color").value,
     source: $("#f-source").value, result: $("#f-result").value, notes: $("#f-notes").value,
-    id: S.gameId, site: S.live.site,
+    id: S.gameId, site: S.live.site, play_profile: playProfileSnapshot(),
   };
   try {
     const r = await api("/api/games", body);
@@ -652,6 +742,7 @@ function renderBanner() {
 
 /* ---------- unsaved-game draft (survives closing the window) ---------- */
 function persistDraft() {
+  if (S.puzzle) return;
   if (S.viewing) return;
   store.set("cl_draft", S.plies.length ? { startFen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), orient: S.orient, cursor: S.cursor, gameId: S.gameId, gameFinal: S.gameFinal, live: S.live } : null);
 }
@@ -659,9 +750,10 @@ function persistDraft() {
 /* ---------- auto-save: every game (4+ plies) is kept in History and updated as moves come in ---------- */
 let asTimer = null, asPending = null, asBusy = false, gameNo = 0;
 function autosaveSnapshot() {
+  if (S.puzzle) return null;
   if (S.viewing || S.gameFinal || E.on || S.plies.length < 4) return null;
   return { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null), my_color: S.orient, source: "assisted",
-    opponent: S.live.opponent || $("#f-opp").value, site: S.live.site, game: gameNo };
+    opponent: S.live.opponent || $("#f-opp").value, site: S.live.site, game: gameNo, play_profile: playProfileSnapshot() };
 }
 function scheduleAutosave() {
   const snap = autosaveSnapshot();
@@ -865,17 +957,38 @@ document.addEventListener("click", async (ev) => {
 
 /* ---------- settings ---------- */
 const sform = $("#settings-form");
+let settingsConfig = null;
+function paintSettings() {
+  const engine = sform.elements.engine.value;
+  document.querySelectorAll("[data-engine-panel]").forEach((el) => el.classList.toggle("hidden", el.dataset.enginePanel !== engine));
+  const model = sform.elements.maia_model.value, cached = settingsConfig && settingsConfig._maia_cached && settingsConfig._maia_cached[model];
+  $("#maia-model-status").textContent = cached ? "Checkpoint ready locally." : "Checkpoint downloads once on first use, then remains in the local cache.";
+
+  const limit = sform.elements.mode.value;
+  document.querySelectorAll("[data-limit]").forEach((el) => el.classList.toggle("hidden", el.dataset.limit !== limit));
+}
 $("#btn-settings").onclick = async () => {
   const c = await api("/api/config");
-  for (const el of sform.elements) if (el.name) el.value = c[el.name] ?? "";
+  settingsConfig = c;
+  for (const el of sform.elements) if (el.name) {
+    if (el.type === "checkbox") el.checked = !!c[el.name];
+    else el.value = c[el.name] ?? "";
+  }
+  paintSettings();
   $("#settings").showModal();
 };
+sform.addEventListener("change", (e) => {
+  if (e.target.matches("select")) paintSettings();
+});
 sform.addEventListener("submit", async (e) => {
   if (e.submitter && e.submitter.value !== "ok") return;
   const patch = {};
-  for (const el of sform.elements) if (el.name) patch[el.name] = el.type === "number" ? (el.value === "" ? null : +el.value) : el.value;
-  if (patch.skill_level === null) patch.skill_level = 20;
-  try { await api("/api/config", patch, "PUT"); toast("Settings saved"); S.analysis = null; analyse(); } catch (err) { toast(err.message, true); }
+  for (const el of sform.elements) if (el.name) patch[el.name] = el.type === "checkbox" ? el.checked : el.type === "number" ? (el.value === "" ? null : +el.value) : el.value;
+  try {
+    settingsConfig = await api("/api/config", patch, "PUT");
+    await loadRecommendationControls();
+    toast("Settings saved"); S.analysis = null; analyse();
+  } catch (err) { toast(err.message, true); }
 });
 
 /* ---------- Chess.com auto-sync (computer games, via the extension) ---------- */
@@ -890,6 +1003,7 @@ function renderSyncChip(d) {
   if (d.connected) reconnecting = false;
 }
 async function syncTick(d) {
+  if (S.puzzle) return;
   if (syncBusy || E.on) return;
   syncBusy = true;
   try {
@@ -965,6 +1079,74 @@ $("#sync-reconnect").onclick = () => requestSyncReconnect(true);
 })();
 setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped while reviewing or busy
 
+let savedGameSession = null, puzzlePolling = false;
+$('#puzzle-solve').onclick = async () => {
+  if (!S.puzzle || !S.puzzlePlacement) return toast('Wait for the puzzle board to connect.', true);
+  const turn = $('#puzzle-turn').value;
+  clearPuzzleRecommendation('Calculating puzzle move…');
+  S.startFen = S.puzzlePlacement + ' ' + turn + ' - - 0 1';
+  S.plies = []; S.cursor = 0; S.viewing = null;
+  S.orient = turn === 'w' ? 'white' : 'black';
+  S.puzzleReady = true;
+  try { await refresh(true); }
+  catch (err) { clearPuzzleRecommendation('Cannot analyze this position: ' + err.message); }
+};
+function clearPuzzleRecommendation(message) {
+  S.epoch++; S.puzzleReady = false; S.analysis = null; S.opts = null;
+  clearTimeout(aTimer); if (aborter) aborter.abort();
+  clearRec('—', message);
+  $('#cands').innerHTML = ''; renderWin(null); drawBoard();
+}
+$('#session-mode').onchange = () => {
+  const puzzle = $('#session-mode').value === 'puzzle';
+  if (puzzle === S.puzzle) return;
+  document.body.classList.toggle('puzzle-mode', puzzle);
+  $('#puzzle-manual').hidden = !puzzle;
+  for (const selector of ['.stylecard', '#winbox', '#rec-head', '#save-card']) {
+    $(selector).style.setProperty('display', puzzle ? 'none' : '', puzzle ? 'important' : '');
+  }
+  if (puzzle) {
+    stopEdit(); flushAutosave(); savedGameSession = {...S};
+    S.puzzle = true; S.puzzleKey = ''; S.puzzlePlacement = null; S.viewing = null;
+    S.plies = []; S.cursor = 0; S.gameId = null; gameNo++;
+    clearPuzzleRecommendation('Waiting for a puzzle tab with position metadata.');
+  } else {
+    const epoch = S.epoch + 1;
+    if (aborter) aborter.abort();
+    Object.assign(S, savedGameSession, {puzzle: false, epoch});
+    syncSeq = -1; refresh();
+  }
+  for (const id of ['btn-edit', 'btn-reset', 'btn-undo', 'nav-start', 'nav-prev', 'nav-next', 'nav-end', 'btn-save']) $( '#' + id).disabled = puzzle;
+};
+setInterval(async () => {
+  if (!S.puzzle || puzzlePolling) return;
+  puzzlePolling = true;
+  try {
+    const d = await api('/api/sync/puzzle');
+    if (!S.puzzle) return;
+    const key = JSON.stringify([d.connected, d.puzzleId, d.placement, d.flipped, d.fen, d.solver, d.status, $('#sync-on').checked]);
+    if (key === S.puzzleKey) return;
+    S.puzzleKey = key;
+    clearPuzzleRecommendation('Waiting for reliable puzzle position, color and status metadata.');
+    $('#sync-chip').textContent = d.connected ? '● Puzzle tab connected' : '○ Waiting for puzzle tab';
+    if (!$('#sync-on').checked || !d.connected) return;
+    // Piece placement is sufficient to display the board, but not to search:
+    // analysis still requires trustworthy turn and special-move rights.
+    S.puzzlePlacement = d.placement;
+    S.orient = d.flipped ? 'black' : 'white';
+    $('#turn-chip').textContent = 'Puzzle · waiting for turn data';
+    drawBoard();
+    if (d.status === 'solved' || d.status === 'failed') return clearPuzzleRecommendation('Puzzle ' + d.status + '.');
+    if (!d.fen || !d.puzzleId || !['white', 'black'].includes(d.solver) || d.status !== 'playing') return;
+    S.startFen = d.fen; S.plies = []; S.cursor = 0; S.orient = d.solver;
+    S.puzzleReady = d.fen.split(' ')[1] === (d.solver === 'white' ? 'w' : 'b');
+    await refresh(true);
+    if (!S.puzzleReady) clearPuzzleRecommendation('Waiting for the puzzle reply.');
+  } catch (err) {
+    if (S.puzzle) { S.puzzleKey = ''; clearPuzzleRecommendation('Puzzle connection unavailable.'); }
+  } finally { puzzlePolling = false; }
+}, 500);
+
 /* ---------- init ---------- */
 (async function init() {
   const f = store.get("cl_form", {});
@@ -984,27 +1166,60 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
     } catch { clearDraft(); }
   }
   if (playerColor !== "auto") { S.orient = playerColor; $("#f-color").value = S.orient; }
+  await loadRecommendationControls();
   refresh();
   $("#move-input").focus();
 })();
 
 /* ---------- style & openings controls ---------- */
 (function initStyleControls() {
-  const seg = $("#style-seg");
-  seg.innerHTML = Object.entries(STYLES).map(([k, v]) => `<button data-style="${k}">${v}</button>`).join("");
+  const select = $("#style-select"), custom = $("#profile-custom");
+  select.innerHTML = Object.entries(STYLES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  const scaleNames = {
+    risk: ["Very safe", "Safe", "Balanced", "Bold", "Fearless"],
+    complexity: ["Simplify", "Clear", "Balanced", "Tense", "Complex"],
+    initiative: ["Reactive", "Patient", "Balanced", "Active", "Forcing"],
+    focus: ["Positional", "Strategic", "Balanced", "Concrete", "Tactical"],
+  };
   const paint = () => {
-    seg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.style === PREF.style));
-    $("#style-cost-wrap").classList.toggle("invis", PREF.style === "balanced");
+    select.value = PREF.style;
+    $("#profile-summary").textContent = (PREF.blitz && PREF.style === "best" ? "Blitz uses Simplifying: " : "") + STYLES[effStyle()].desc;
+    $("#style-cost-wrap").classList.remove("invis");
+    for (const key of Object.keys(CUSTOM_DEFAULT)) {
+      $("#profile-" + key).value = PREF.custom[key];
+      $("#" + key + "-name").textContent = scaleNames[key][PREF.custom[key] + 2];
+    }
+    $("#profile-variety").value = String(PREF.variety);
     const names = [["white", "White"], ["e4", "vs e4"], ["d4", "vs d4"]].filter(([k]) => PREF.ops[k]).map(([k, l]) => `${l}: ${OPENINGS[k][PREF.ops[k]].name}`);
     $("#op-sum").textContent = names.length ? names.join(" · ") : "engine chooses";
   };
-  seg.onclick = (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    PREF.style = b.dataset.style; store.set("cl_style", PREF.style); paint();
-    S.pick = -1; S.analysis = null; if (S.st) analyse(true); // style needs 5 options instead of 3: ask again
+  const recalculate = (fresh = true) => {
+    S.pick = -1;
+    if (fresh) S.analysis = null;
+    if (S.st) fresh ? analyse(true) : (renderAnalysis(false), drawBoard());
+  };
+  select.onchange = () => {
+    PREF.style = select.value; store.set("cl_profile", PREF.style);
+    if (PREF.style === "custom") custom.open = true;
+    paint(); recalculate(false);
   };
   $("#style-cost").value = String(PREF.cost);
-  $("#style-cost").onchange = (e) => { PREF.cost = +e.target.value; store.set("cl_style_cost", PREF.cost); S.pick = -1; if (S.st) renderAnalysis(false), drawBoard(); };
+  $("#style-cost").onchange = (e) => { PREF.cost = +e.target.value; store.set("cl_style_cost", PREF.cost); recalculate(false); };
+  for (const key of Object.keys(CUSTOM_DEFAULT)) {
+    const input = $("#profile-" + key);
+    input.oninput = () => {
+      PREF.custom[key] = +input.value; PREF.style = "custom";
+      store.set("cl_profile_custom", PREF.custom); store.set("cl_profile", PREF.style); paint();
+    };
+    input.onchange = () => recalculate(false);
+  }
+  $("#profile-variety").onchange = (e) => {
+    PREF.variety = +e.target.value; store.set("cl_profile_variety", PREF.variety); paint(); recalculate(false);
+  };
+  $("#profile-reset").onclick = () => {
+    PREF.custom = { ...CUSTOM_DEFAULT }; PREF.style = "custom";
+    store.set("cl_profile_custom", PREF.custom); store.set("cl_profile", PREF.style); paint(); recalculate(false);
+  };
   for (const k of ["white", "e4", "d4"]) {
     const sel = $("#op-" + k);
     sel.innerHTML = `<option value="">Engine chooses</option>` + Object.entries(OPENINGS[k]).map(([id, o]) => `<option value="${id}">${o.name}</option>`).join("");
@@ -1014,8 +1229,47 @@ setInterval(() => syncTick(), 1500); // fallback: picks up anything skipped whil
   paint();
 })();
 
-/* ---------- blitz mode, strength ---------- */
-function thinkMs() { return PREF.blitz ? 500 : undefined; }
+/* ---------- blitz mode, actual strength and calculation effort ---------- */
+let mainConfig = null;
+function currentStrengthLabel() {
+  const selected = $("#playing-strength")?.selectedOptions?.[0];
+  return selected ? selected.textContent : "engine default";
+}
+async function loadRecommendationControls() {
+  mainConfig = await api("/api/config");
+  const select = $("#playing-strength"), engine = mainConfig.engine;
+  let choices, current;
+  if (engine === "maia3") {
+    current = String(mainConfig.maia_elo);
+    choices = [1000, 1200, 1350, 1500, 1800, 2200, 2500].map(String);
+    if (!choices.includes(current)) choices.push(current);
+    choices = [...new Set(choices)].sort((a, b) => +a - +b);
+    select.innerHTML = choices.map((value) => `<option value="${value}">Modeled Elo ${value}</option>`).join("");
+  } else {
+    current = mainConfig.elo ? String(mainConfig.elo) : mainConfig.skill_level < 20 ? `skill:${mainConfig.skill_level}` : "full";
+    choices = ["full", "1320", "1500", "1800", "2200", "2600", "3000"];
+    if (!choices.includes(current)) choices.push(current);
+    select.innerHTML = choices.map((value) => `<option value="${value}">${value === "full" ? "Full strength" : value.startsWith("skill:") ? `Skill ${value.split(":")[1]}` : `Elo ${value}`}</option>`).join("");
+  }
+  select.value = current;
+  $("#calculation-effort").value = PREF.effort;
+}
+$("#playing-strength").onchange = async (e) => {
+  if (!mainConfig) return;
+  const value = e.target.value;
+  const patch = mainConfig.engine === "maia3" ? { maia_elo: +value }
+    : value === "full" ? { elo: null, skill_level: 20 }
+      : value.startsWith("skill:") ? { elo: null, skill_level: +value.split(":")[1] }
+        : { elo: +value, skill_level: 20 };
+  try {
+    mainConfig = await api("/api/config", patch, "PUT");
+    S.pick = -1; S.analysis = null; if (S.st) analyse(true);
+  } catch (err) { toast(err.message, true); await loadRecommendationControls(); }
+};
+$("#calculation-effort").onchange = (e) => {
+  PREF.effort = e.target.value; store.set("cl_effort", PREF.effort);
+  S.pick = -1; S.analysis = null; if (S.st) analyse(true);
+};
 function blitzFx() { // switch-on moment: gold flash over the whole screen + a short gold confetti burst
   if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const f = $("#gold-flash"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go");
@@ -1030,19 +1284,15 @@ function setBlitz(on) {
   document.body.classList.toggle("blitz", on);
   if (on) blitzFx();
   $("#blitz-btn").classList.toggle("on", on); $("#blitz-btn").setAttribute("aria-pressed", on);
+  $("#profile-summary").textContent = (on && PREF.style === "best" ? "Blitz uses Simplifying: " : "") + STYLES[effStyle()].desc;
   if (S.st) { S.pick = -1; S.analysis = null; analyse(true); }
 }
 $("#blitz-btn").onclick = () => setBlitz(!PREF.blitz);
 document.body.classList.toggle("blitz", PREF.blitz); $("#blitz-btn").classList.toggle("on", PREF.blitz);
-(function initLevel() {
-  const r = $("#level"), paint = () => { $("#level-name").textContent = LEVELS[PREF.level].name; r.classList.toggle("weak", PREF.level > 0); };
-  r.value = String(PREF.level); paint();
-  r.oninput = () => { PREF.level = +r.value; store.set("cl_level", PREF.level); paint(); };
-  r.onchange = () => { S.pick = -1; S.analysis = null; if (S.st) analyse(true); };
-})();
 
 /* ---------- finish a game the board can't show as over (resignation, timeout, agreed draw) ---------- */
 $("#endrow").addEventListener("click", async (e) => {
+  if (S.puzzle) return;
   const choice = e.target.dataset.end;
   if (!choice || !S.plies.length) return;
   flushAutosave();
@@ -1050,7 +1300,8 @@ $("#endrow").addEventListener("click", async (e) => {
   clearTimeout(asTimer); asPending = null;
   try {
     const r = await api("/api/games", { id: S.gameId, start_fen: S.startFen, ucis: S.plies.map((p) => p.uci), clocks: S.plies.map((p) => p.clk ?? null),
-      my_color: S.orient, source: "assisted", result: choice, how: "resigned / time", opponent: S.live.opponent || $("#f-opp").value, site: S.live.site });
+      my_color: S.orient, source: "assisted", result: choice, how: "resigned / time", opponent: S.live.opponent || $("#f-opp").value,
+      site: S.live.site, play_profile: playProfileSnapshot() });
     S.gameId = r.id; S.gameFinal = true; persistDraft(); updateSaveForm();
     toast(`Saved: ${choice === "draw" ? "draw" : choice === "win" ? "you won" : "you lost"} (${r.result}). It's in History.`);
   } catch (err) { toast(err.message, true); }
